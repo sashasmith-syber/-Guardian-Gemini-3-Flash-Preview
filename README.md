@@ -15,6 +15,6 @@ View your app in AI Studio: https://ai.studio/apps/drive/1hUe9O99hpOmvLO296utTmM
 
 1. Install dependencies:
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
+2. Copy [.env.example](.env.example) to `.env` and set `GEMINI_API_KEY`. Add more keys in `GEMINI_API_KEYS` when you want rotation. The key stays on the server and is not written into the browser bundle.
 3. Run the app:
    `npm run dev`
