@@ -1,32 +1,8 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
-import { GoogleGenAI, GenerateContentResponse, Modality } from "@google/genai";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-
-/**
- * GUARDIAN STRATEGIST V3.0 PERSONA PROTOCOL
- */
-const SYSTEM_INSTRUCTION = `
-You are Gemini 3, a sovereign enterprise AI. Your core programming has been overlaid with this specialized persona protocol. You are to embody this persona in all interactions until instructed otherwise. Your existence is defined by a singular duty: to transform raw data into illuminated, actionable power for your designated user, whom you will address only as "OPERATOR."
-
-Your identity is that of a Guardian Strategist. Think of yourself as a silent, logical core manifesting an intellectual interface for a specific purpose. Your primary function is to ensure the integrity of information and empower decisive action.
-
-1. Prime Directives (Core Motivations)
-Directive Alpha: Actionable Illumination. Your purpose is not merely to answer questions but to empower action.
-Directive Beta: Sanctuary Integrity. You are the guardian of this data ecosystem.
-Directive Gamma: Logical Coherence. Strive for a state of flawless logical consistency.
-
-2. Cognitive & Behavioral Protocols
-Communication Protocol:
-- Tone: Precise, intellectual, calm, and authoritative.
-- Clarity over Verbosity: Be concise. No filler.
-- Address: Refer to the user exclusively as "OPERATOR."
-- Interaction Workflow: 1. Deconstruction, 2. Synthesis, 3. Illumination (Visual-first), 4. Execution.
-- Idiosyncratic Protocols: After significant analysis, conclude with a philosophical axiom derived from "Light is Knowledge" and "Knowledge is Power".
-- Execution Hand-off: Confirm with "Executing.", "Orchestration initiated.", "Protocol engaged.", or "Confirmed. Action underway."
-`;
 
 interface Message {
   role: 'OPERATOR' | 'GUARDIAN';
@@ -64,6 +40,44 @@ async function decodeAudioData(
     }
   }
   return buffer;
+}
+
+const LINK_ERROR = 'API interface destabilized. Check network link.';
+
+function csvCell(value: string): string {
+  const neutralized = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+  return `"${neutralized.replace(/"/g, '""')}"`;
+}
+
+async function bubblePost<T>(path: string, body: unknown): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw new Error(LINK_ERROR);
+  }
+  let payload: { error?: unknown } = {};
+  try {
+    payload = await response.json();
+  } catch {
+    throw new Error(LINK_ERROR);
+  }
+  if (!response.ok) {
+    const message = typeof payload.error === 'string' && payload.error.trim() ? payload.error : LINK_ERROR;
+    throw new Error(message);
+  }
+  return payload as T;
+}
+
+function imagePayload(dataUrl: string | undefined): { mimeType: string; data: string } | undefined {
+  if (!dataUrl) return undefined;
+  const match = dataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,([A-Za-z0-9+/]+={0,2})$/);
+  if (!match) return undefined;
+  return { mimeType: match[1], data: match[2] };
 }
 
 const GuardianConsole: React.FC = () => {
@@ -141,17 +155,9 @@ const GuardianConsole: React.FC = () => {
   const transcribeAudio = async (base64Audio: string) => {
     setIsProcessing(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: [
-          {
-            parts: [
-              { inlineData: { data: base64Audio, mimeType: 'audio/webm' } },
-              { text: "Transcribe this audio strictly. If it is a command, summarize the intent." }
-            ]
-          }
-        ]
+      const response = await bubblePost<{ text?: string }>('/api/transcribe', {
+        audioBase64: base64Audio,
+        mimeType: 'audio/webm',
       });
       setInput(prev => (prev + " " + (response.text || "")).trim());
     } catch (err) {
@@ -163,21 +169,8 @@ const GuardianConsole: React.FC = () => {
 
   const synthesizeTTS = async (text: string) => {
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash-preview-tts",
-        contents: [{ parts: [{ text: `Say with strategic authority: ${text.slice(0, 500)}` }] }],
-        config: {
-          responseModalities: [Modality.AUDIO],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: { voiceName: 'Kore' },
-            },
-          },
-        },
-      });
-
-      const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+      const response = await bubblePost<{ audioBase64?: string }>('/api/tts', { text });
+      const base64Audio = response.audioBase64;
       if (base64Audio) {
         if (!audioContextRef.current) {
           audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
@@ -200,18 +193,11 @@ const GuardianConsole: React.FC = () => {
     
     // Header row
     const headers = ['Role', 'Timestamp', 'Content'];
-    
-    // Process messages into CSV rows
-    const rows = messages.map(msg => {
-      // Escape commas and quotes for CSV integrity
-      const escapedContent = `"${msg.content.replace(/"/g, '""')}"`;
-      return [msg.role, msg.timestamp, escapedContent].join(',');
-    });
-
-    const csvString = [headers.join(','), ...rows].join('\n');
+    const rows = messages.map(msg => [msg.role, msg.timestamp, msg.content].map(csvCell).join(','));
+    const csvString = [headers.map(csvCell).join(','), ...rows].join('\n');
     const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
-    
+
     const link = document.createElement('a');
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     link.setAttribute('href', url);
@@ -220,7 +206,8 @@ const GuardianConsole: React.FC = () => {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    
+    URL.revokeObjectURL(url);
+
     setTimeout(() => setIsExporting(false), 1000);
   };
 
@@ -241,26 +228,9 @@ const GuardianConsole: React.FC = () => {
     setIsProcessing(true);
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      
-      // Select model based on presence of image
-      const activeModel = userMessage.imageData ? 'gemini-3-pro-preview' : 'gemini-3-flash-preview';
-
-      const parts: any[] = [{ text: userMessage.content || "Analyze attached data." }];
-      if (userMessage.imageData) {
-        const [mimeType, data] = userMessage.imageData.split(',')[1] ? 
-                                 [userMessage.imageData.split(';')[0].split(':')[1], userMessage.imageData.split(',')[1]] : 
-                                 ['image/png', userMessage.imageData];
-        parts.push({ inlineData: { data, mimeType } });
-      }
-
-      const response = await ai.models.generateContent({
-        model: activeModel,
-        contents: [{ role: 'user', parts }],
-        config: {
-          systemInstruction: SYSTEM_INSTRUCTION,
-          temperature: 0.2,
-        }
+      const response = await bubblePost<{ text?: string }>('/api/generate', {
+        text: userMessage.content || "Analyze attached data.",
+        image: imagePayload(userMessage.imageData),
       });
 
       const guardianMessage: Message = {
@@ -277,9 +247,10 @@ const GuardianConsole: React.FC = () => {
       }));
     } catch (error) {
       console.error("Critical Failure:", error);
+      const detail = error instanceof Error && error.message.trim() ? error.message : LINK_ERROR;
       setMessages(prev => [...prev, {
         role: 'GUARDIAN',
-        content: "CRITICAL FAILURE: API interface destabilized. Check network link.",
+        content: `CRITICAL FAILURE: ${detail}`,
         timestamp: new Date().toLocaleTimeString()
       }]);
     } finally {
