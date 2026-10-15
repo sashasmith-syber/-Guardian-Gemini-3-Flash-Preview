@@ -80,6 +80,20 @@ function imagePayload(dataUrl: string | undefined): { mimeType: string; data: st
   return { mimeType: match[1], data: match[2] };
 }
 
+const controlClass = "inline-flex min-h-11 shrink-0 items-center justify-center rounded border border-[#00f2ff]/40 bg-[#111] px-3 text-xs text-[#00f2ff] hover:bg-[#00f2ff]/10 disabled:cursor-not-allowed disabled:text-[#7eccd0]";
+
+function attachmentFact(recording: boolean, image: boolean): string {
+  if (recording && image) return "Image and microphone";
+  if (recording) return "Microphone on";
+  if (image) return "Image attached";
+  return "Clear";
+}
+
+function shorten(value: string): string {
+  const clean = value.replace(/\s+/g, " ").trim();
+  return clean.length > 48 ? `${clean.slice(0, 45)}...` : clean;
+}
+
 const GuardianConsole: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -87,24 +101,38 @@ const GuardianConsole: React.FC = () => {
   const [isRecording, setIsRecording] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
-  const [status, setStatus] = useState({
-    integrity: 100,
-    coherence: 100,
-    threat: 0,
-    load: 12
-  });
+  const [bubbleReady, setBubbleReady] = useState<boolean | null>(null);
+  const [lastResult, setLastResult] = useState("None yet");
+  const [liveMessage, setLiveMessage] = useState("");
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    messagesEndRef.current?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth" });
+  }, [messages, isProcessing]);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  const refreshBubble = async () => {
+    try {
+      const response = await fetch("/api/health");
+      const body = await response.json() as { ready?: boolean };
+      setBubbleReady(Boolean(body.ready));
+    } catch {
+      setBubbleReady(false);
+    }
+  };
+
+  useEffect(() => {
+    void refreshBubble();
+  }, []);
+
+  const noteResult = (value: string, announce: string) => {
+    setLastResult(shorten(value));
+    setLiveMessage(announce);
   };
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -148,6 +176,7 @@ const GuardianConsole: React.FC = () => {
         setIsRecording(true);
       } catch (err) {
         console.error("Mic access denied:", err);
+        noteResult("Microphone blocked", "Failure. Microphone blocked.");
       }
     }
   };
@@ -160,8 +189,11 @@ const GuardianConsole: React.FC = () => {
         mimeType: 'audio/webm',
       });
       setInput(prev => (prev + " " + (response.text || "")).trim());
+      noteResult("Transcript added", "Transcript added to the command.");
     } catch (err) {
       console.error("Transcription error:", err);
+      const detail = err instanceof Error && err.message.trim() ? err.message : LINK_ERROR;
+      noteResult(detail, `Failure. ${detail}`);
     } finally {
       setIsProcessing(false);
     }
@@ -181,9 +213,12 @@ const GuardianConsole: React.FC = () => {
         source.buffer = audioBuffer;
         source.connect(ctx.destination);
         source.start();
+        noteResult("Playing reply", "Playing reply.");
       }
     } catch (err) {
       console.error("TTS Synthesis error:", err);
+      const detail = err instanceof Error && err.message.trim() ? err.message : LINK_ERROR;
+      noteResult(detail, `Failure. ${detail}`);
     }
   };
 
@@ -225,7 +260,9 @@ const GuardianConsole: React.FC = () => {
     setMessages(prev => [...prev, userMessage]);
     setInput('');
     setSelectedImage(null);
+    if (fileRef.current) fileRef.current.value = "";
     setIsProcessing(true);
+    setLiveMessage("Sending.");
 
     try {
       const response = await bubblePost<{ text?: string }>('/api/generate', {
@@ -240,11 +277,7 @@ const GuardianConsole: React.FC = () => {
       };
 
       setMessages(prev => [...prev, guardianMessage]);
-      setStatus(prev => ({
-        ...prev,
-        load: Math.floor(Math.random() * 40) + 10,
-        coherence: 95 + Math.random() * 5
-      }));
+      noteResult("Reply received", guardianMessage.content);
     } catch (error) {
       console.error("Critical Failure:", error);
       const detail = error instanceof Error && error.message.trim() ? error.message : LINK_ERROR;
@@ -253,214 +286,144 @@ const GuardianConsole: React.FC = () => {
         content: `CRITICAL FAILURE: ${detail}`,
         timestamp: new Date().toLocaleTimeString()
       }]);
+      noteResult(detail, `Failure. ${detail}`);
     } finally {
       setIsProcessing(false);
+      void refreshBubble();
     }
   };
 
+  const clearImage = () => {
+    setSelectedImage(null);
+    if (fileRef.current) fileRef.current.value = "";
+  };
+
+  const openImagePicker = () => fileRef.current?.click();
+
+  const bubbleFact = bubbleReady === null ? "Checking" : bubbleReady ? "Ready" : "Not ready";
+  const canSend = (input.trim().length > 0 || Boolean(selectedImage)) && !isProcessing;
+
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-[#00f2ff] font-mono flex flex-col p-4 overflow-hidden relative">
-      <div className="absolute inset-0 pointer-events-none z-50 opacity-[0.03] bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[length:100%_2px,3px_100%]" />
-      
-      <header className="border-b border-[#00f2ff]/30 pb-2 mb-4 flex justify-between items-center bg-[#0a0a0a]/80 backdrop-blur-sm sticky top-0 z-40">
-        <div>
-          <h1 className="text-xl font-bold tracking-widest text-[#00f2ff]">GUARDIAN STRATEGIST V3.0</h1>
-          <p className="text-[10px] text-[#00f2ff]/60 uppercase">Sanctuary Operational Environment</p>
-        </div>
-        <div className="text-right flex items-center gap-4">
-          <div className="flex flex-col text-right">
-             <span className="text-[10px] uppercase opacity-50">Sensor Status</span>
-             <div className="flex gap-2">
-                <span className={`w-2 h-2 rounded-full ${isRecording ? 'bg-red-500 animate-ping' : 'bg-green-500'}`} />
-                <span className={`w-2 h-2 rounded-full ${selectedImage ? 'bg-blue-500 animate-pulse' : 'bg-green-500'}`} />
-             </div>
-          </div>
-          <span className="text-xs uppercase font-semibold">System: Stable</span>
+    <div className="relative flex h-dvh flex-col overflow-hidden bg-[#0a0a0a] p-4 font-mono text-[#00f2ff]">
+      <div className="pointer-events-none absolute inset-0 z-50 bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[length:100%_2px,3px_100%] opacity-[0.03]" />
+      <div className="sr-only" role="status" aria-live="polite">{liveMessage}</div>
+
+      <header className="relative z-10 shrink-0 border-b border-[#00f2ff]/30 pb-3">
+        <h1 className="text-xl font-bold tracking-wide">GUARDIAN STRATEGIST V3.0</h1>
+        <p className="mt-1 text-xs">Sanctuary operational environment</p>
+        <div className="mt-3 flex flex-wrap items-center gap-2" role="group" aria-label="System status">
+          <button
+            type="button"
+            onClick={exportDataLog}
+            disabled={messages.length === 0 || isExporting}
+            aria-busy={isExporting}
+            className={controlClass}
+          >
+            {isExporting ? "Exporting" : "Export log"}
+          </button>
+          <p className="inline-flex min-h-11 items-center gap-2 rounded border border-[#00f2ff]/30 px-3 text-xs">
+            <span className="text-[#b7ecec]">Bubble</span>
+            <span className="font-bold">{bubbleFact}</span>
+          </p>
+          <p className="inline-flex min-h-11 items-center gap-2 rounded border border-[#00f2ff]/30 px-3 text-xs">
+            <span className="text-[#b7ecec]">Attachment</span>
+            <span className="font-bold">{attachmentFact(isRecording, Boolean(selectedImage))}</span>
+          </p>
+          <p className="inline-flex min-h-11 items-center gap-2 rounded border border-[#00f2ff]/30 px-3 text-xs">
+            <span className="text-[#b7ecec]">Last result</span>
+            <span className="font-bold">{lastResult}</span>
+          </p>
         </div>
       </header>
 
-      <div className="flex-1 flex gap-4 overflow-hidden">
-        <aside className="w-64 flex flex-col gap-4 border-r border-[#00f2ff]/20 pr-4 hidden lg:flex">
-          <div className="p-3 border border-[#00f2ff]/20 bg-[#111]">
-            <h3 className="text-xs mb-2 border-b border-[#00f2ff]/20 pb-1 opacity-80 uppercase tracking-tighter text-blue-300">Tactical Actions</h3>
-            <button 
-              onClick={exportDataLog}
-              disabled={messages.length === 0 || isExporting}
-              className={`w-full text-left py-2 px-3 border border-[#00f2ff]/30 rounded text-[10px] uppercase transition-all flex items-center justify-between group ${
-                messages.length === 0 ? 'opacity-30 cursor-not-allowed' : 'hover:bg-[#00f2ff]/10 hover:border-[#00f2ff]'
-              }`}
-            >
-              <span>{isExporting ? 'EXTRACTING...' : 'EXPORT_DATA_LOG'}</span>
-              <span className="group-hover:translate-x-1 transition-transform">→</span>
+      <main aria-busy={isProcessing} className="relative z-10 mt-4 flex min-h-0 flex-1 flex-col rounded border border-[#00f2ff]/10 bg-[#0d0d0d]">
+        <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-4 scrollbar-thin">
+          {messages.length === 0 && (
+            <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
+              <p className="text-sm">Guardian protocol active. Attach an image or record, then send a command.</p>
+              <div className="flex flex-wrap justify-center gap-2">
+                <button type="button" className={controlClass} onClick={openImagePicker}>Attach image</button>
+                <button type="button" className={controlClass} onClick={toggleRecording} aria-pressed={isRecording}>
+                  {isRecording ? "Stop recording" : "Record"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {messages.map((msg, idx) => (
+            <div key={idx}>
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className={`rounded px-1 py-0.5 text-xs ${msg.role === 'OPERATOR' ? 'bg-[#00f2ff] text-black' : 'border border-[#00f2ff]/30 bg-[#222] text-[#00f2ff]'}`}>
+                    {msg.role}
+                  </span>
+                  <span className="text-xs text-[#b7ecec]">{msg.timestamp}</span>
+                </div>
+                {msg.role === 'GUARDIAN' && (
+                  <button type="button" onClick={() => synthesizeTTS(msg.content)} className={controlClass}>
+                    Play
+                  </button>
+                )}
+              </div>
+              <div className={`border-l pl-4 text-sm leading-relaxed text-[#e0e0e0] ${msg.role === 'OPERATOR' ? 'border-[#00f2ff]/20' : 'border-[#00f2ff]/60'}`}>
+                {msg.imageData && (
+                  <img src={msg.imageData} className="mb-3 max-w-[200px] rounded border border-[#00f2ff]/30" alt="Attached image" />
+                )}
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    table: ({node, ...props}) => <div className="my-4 overflow-x-auto"><table className="w-full border-collapse border border-[#00f2ff]/30 text-xs" {...props} /></div>,
+                    th: ({node, ...props}) => <th className="border border-[#00f2ff]/30 bg-[#111] p-2 text-left text-[#00f2ff] uppercase" {...props} />,
+                    td: ({node, ...props}) => <td className="border border-[#00f2ff]/30 p-2" {...props} />,
+                    code: ({node, ...props}) => <code className="rounded bg-[#1a1a1a] p-1 text-[#9fd4d8]" {...props} />,
+                  }}
+                >
+                  {msg.content}
+                </ReactMarkdown>
+              </div>
+            </div>
+          ))}
+          {isProcessing && <p className="text-xs">Sending</p>}
+          <div ref={messagesEndRef} />
+        </div>
+
+        <form onSubmit={handleCommand} className="border-t border-[#00f2ff]/20 bg-[#0a0a0a] p-4">
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            tabIndex={-1}
+            onChange={handleImageUpload}
+          />
+          {selectedImage && (
+            <div className="mb-3 flex items-center gap-3">
+              <img src={selectedImage} alt="Attached image" className="h-12 w-12 rounded border border-[#00f2ff]/30 object-cover" />
+              <button type="button" onClick={clearImage} className={controlClass}>Discard</button>
+            </div>
+          )}
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" className={controlClass} onClick={openImagePicker}>Attach image</button>
+            <button type="button" className={controlClass} onClick={toggleRecording} aria-pressed={isRecording}>
+              {isRecording ? "Stop recording" : "Record"}
             </button>
-          </div>
-
-          <div className="p-3 border border-[#00f2ff]/20 bg-[#111]">
-            <h3 className="text-xs mb-2 border-b border-[#00f2ff]/20 pb-1 opacity-80 uppercase tracking-tighter">Node Integrity</h3>
-            <div className="h-2 bg-[#222] rounded-full overflow-hidden">
-              <div className="h-full bg-[#00f2ff]" style={{ width: `${status.integrity}%` }} />
-            </div>
-          </div>
-
-          <div className="p-3 border border-[#00f2ff]/20 bg-[#111]">
-            <h3 className="text-xs mb-2 border-b border-[#00f2ff]/20 pb-1 opacity-80 uppercase tracking-tighter">Logical Coherence</h3>
-            <div className="h-2 bg-[#222] rounded-full overflow-hidden">
-              <div className="h-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]" style={{ width: `${status.coherence}%` }} />
-            </div>
-          </div>
-
-          <div className="p-3 border border-[#00f2ff]/20 bg-[#111]">
-            <h3 className="text-xs mb-2 border-b border-[#00f2ff]/20 pb-1 opacity-80 uppercase tracking-tighter">Sensor Arrays</h3>
-            <div className="space-y-2 text-[10px]">
-              <div className="flex justify-between items-center">
-                <span>IMAGE_ANALYZER</span>
-                <span className="text-blue-400">G3_PRO</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span>ACOUSTIC_TRANS</span>
-                <span className="text-cyan-400">G3_FLASH</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span>VOCAL_SYNTH</span>
-                <span className="text-purple-400">G2.5_TTS</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-auto opacity-50 text-[10px] space-y-1">
-            <p className="border-t border-[#00f2ff]/10 pt-2">CORE_LOAD: {status.load}%</p>
-            <p>UPTIME: 00:48:22:15</p>
-          </div>
-        </aside>
-
-        <main className="flex-1 flex flex-col bg-[#0d0d0d] border border-[#00f2ff]/10 rounded shadow-[inset_0_0_20px_rgba(0,242,255,0.05)]">
-          <div className="flex-1 overflow-y-auto p-4 space-y-6 scrollbar-thin scrollbar-thumb-[#00f2ff]/20">
-            {messages.length === 0 && (
-              <div className="h-full flex flex-col items-center justify-center opacity-40 text-center space-y-4">
-                <div className="text-4xl">◈</div>
-                <p className="text-sm tracking-widest uppercase">Guardian Protocol Active.</p>
-                <div className="flex gap-4">
-                  <div className="p-2 border border-[#00f2ff]/20 rounded hover:bg-[#00f2ff]/5 cursor-pointer" onClick={() => document.getElementById('image-upload')?.click()}>
-                    <span className="text-[10px]">ATTACH_VISUAL</span>
-                  </div>
-                  <div className={`p-2 border border-[#00f2ff]/20 rounded hover:bg-[#00f2ff]/5 cursor-pointer ${isRecording ? 'bg-red-900/20' : ''}`} onClick={toggleRecording}>
-                    <span className="text-[10px]">{isRecording ? 'LISTENING...' : 'CAPTURE_AUDIO'}</span>
-                  </div>
-                </div>
-              </div>
-            )}
-            
-            {messages.map((msg, idx) => (
-              <div key={idx} className={`animate-in fade-in slide-in-from-bottom-2 duration-300`}>
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <span className={`text-xs px-1 py-0.5 rounded ${msg.role === 'OPERATOR' ? 'bg-[#00f2ff] text-black' : 'bg-[#222] text-[#00f2ff] border border-[#00f2ff]/30'}`}>
-                      {msg.role}
-                    </span>
-                    <span className="text-[10px] opacity-30">{msg.timestamp}</span>
-                  </div>
-                  {msg.role === 'GUARDIAN' && (
-                    <button 
-                      onClick={() => synthesizeTTS(msg.content)}
-                      className="text-[10px] text-[#00f2ff]/50 hover:text-[#00f2ff] flex items-center gap-1 border border-[#00f2ff]/20 px-2 py-0.5 rounded transition-all"
-                    >
-                      <span>🔊</span> SYNTESIZE AUDIO
-                    </button>
-                  )}
-                </div>
-                <div className={`pl-4 border-l ${msg.role === 'OPERATOR' ? 'border-[#00f2ff]/20' : 'border-[#00f2ff]/60'} text-sm leading-relaxed text-[#e0e0e0]`}>
-                  {msg.imageData && (
-                    <div className="mb-3 relative w-fit group">
-                      <img src={msg.imageData} className="max-w-[200px] border border-[#00f2ff]/30 rounded grayscale hover:grayscale-0 transition-all" alt="Analysis Target" />
-                      <div className="absolute inset-0 bg-blue-500/10 pointer-events-none" />
-                    </div>
-                  )}
-                  <ReactMarkdown 
-                    remarkPlugins={[remarkGfm]}
-                    components={{
-                      table: ({node, ...props}) => <div className="overflow-x-auto my-4"><table className="border-collapse border border-[#00f2ff]/30 w-full text-xs" {...props} /></div>,
-                      th: ({node, ...props}) => <th className="border border-[#00f2ff]/30 p-2 bg-[#111] text-[#00f2ff] uppercase text-left" {...props} />,
-                      td: ({node, ...props}) => <td className="border border-[#00f2ff]/30 p-2" {...props} />,
-                      code: ({node, ...props}) => <code className="bg-[#1a1a1a] p-1 rounded text-blue-400" {...props} />,
-                    }}
-                  >
-                    {msg.content}
-                  </ReactMarkdown>
-                </div>
-              </div>
-            ))}
-            {isProcessing && (
-              <div className="flex items-center gap-2 text-xs animate-pulse text-[#00f2ff]">
-                <span>◈</span>
-                <span className="tracking-widest">SYNTHESIZING DATA STREAMS...</span>
-              </div>
-            )}
-            <div ref={messagesEndRef} />
-          </div>
-
-          {/* Input Area */}
-          <form onSubmit={handleCommand} className="p-4 border-t border-[#00f2ff]/20 bg-[#0a0a0a]">
-            {selectedImage && (
-              <div className="mb-2 flex items-center gap-2 p-2 bg-[#111] border border-[#00f2ff]/20 rounded">
-                <img src={selectedImage} className="w-12 h-12 object-cover rounded border border-[#00f2ff]/30" />
-                <div className="text-[10px] text-[#00f2ff]/60">IMAGE_BUFFERED: READY_FOR_ANALYSIS</div>
-                <button type="button" onClick={() => setSelectedImage(null)} className="ml-auto text-red-500 text-xs">DISCARD</button>
-              </div>
-            )}
-            <div className="relative flex items-center gap-2">
-              <input 
-                id="image-upload" 
-                type="file" 
-                accept="image/*" 
-                className="hidden" 
-                onChange={handleImageUpload} 
+            <div className="flex min-h-11 min-w-[12rem] flex-1 items-center rounded border border-[#00f2ff]/40 bg-[#111]">
+              <label htmlFor="command" className="shrink-0 pl-3 text-xs font-bold">Command</label>
+              <input
+                id="command"
+                autoFocus
+                type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                disabled={isProcessing}
+                placeholder="Enter command"
+                className="min-h-11 w-full bg-transparent px-3 text-sm placeholder:text-[#9fd4d8] disabled:opacity-100"
               />
-              <button 
-                type="button" 
-                onClick={() => document.getElementById('image-upload')?.click()}
-                className={`p-2 border border-[#00f2ff]/30 rounded hover:bg-[#00f2ff]/10 transition-colors ${selectedImage ? 'bg-[#00f2ff]/20 border-[#00f2ff]' : ''}`}
-                title="Attach Image for Analysis (Pro)"
-              >
-                📸
-              </button>
-              <button 
-                type="button" 
-                onClick={toggleRecording}
-                className={`p-2 border border-[#00f2ff]/30 rounded hover:bg-[#00f2ff]/10 transition-colors ${isRecording ? 'bg-red-500/20 border-red-500' : ''}`}
-                title="Input Audio for Transcription (Flash)"
-              >
-                {isRecording ? '⏹' : '🎤'}
-              </button>
-              
-              <div className="relative flex-1 flex items-center">
-                <span className="absolute left-4 text-[#00f2ff] text-xs font-bold pointer-events-none">OPERATOR &gt;</span>
-                <input
-                  autoFocus
-                  type="text"
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  disabled={isProcessing}
-                  placeholder={isProcessing ? "LOCKED..." : "ENTER COMMAND"}
-                  className="w-full bg-[#111] border border-[#00f2ff]/30 rounded-sm py-2 pl-24 pr-4 text-sm focus:outline-none focus:border-[#00f2ff] transition-colors placeholder-[#00f2ff]/20 disabled:opacity-50"
-                />
-              </div>
             </div>
-            {isRecording && (
-              <div className="mt-2 h-1 w-full bg-[#111] overflow-hidden rounded">
-                <div className="h-full bg-red-500 animate-[shimmer_2s_infinite]" style={{ width: '100%' }} />
-              </div>
-            )}
-          </form>
-        </main>
-      </div>
-
-      <footer className="h-1 mt-4 bg-[repeating-linear-gradient(90deg,#00f2ff,#00f2ff_2px,transparent_2px,transparent_4px)] opacity-20" />
-      <style>{`
-        @keyframes shimmer {
-          0% { transform: translateX(-100%); }
-          100% { transform: translateX(100%); }
-        }
-      `}</style>
+            <button type="submit" className={controlClass} disabled={!canSend}>Send</button>
+          </div>
+        </form>
+      </main>
     </div>
   );
 };
