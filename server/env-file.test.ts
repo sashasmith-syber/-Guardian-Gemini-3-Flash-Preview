@@ -3,7 +3,7 @@ import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
-import { loadEnvFile, mergeEnv, parseEnv } from './env-file.ts';
+import { loadEnvFile, loadLayeredEnv, mergeEnv, parseEnv } from './env-file.ts';
 import { loadBubbleSettings } from './settings.ts';
 
 describe('env file', () => {
@@ -32,5 +32,16 @@ NOT VALID
 
   it('returns an empty bag when the file is missing', () => {
     assert.deepEqual(loadEnvFile(path.join(tmpdir(), 'missing-guardian-env')), {});
+  });
+
+  it('lets .env.local override .env and the shell override both', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'guardian-layered-'));
+    await writeFile(path.join(dir, '.env'), 'GEMINI_API_KEY=from-env\nGEMINI_API_KEYS=spare\n', { mode: 0o600 });
+    await writeFile(path.join(dir, '.env.local'), 'GEMINI_API_KEY=from-local\n', { mode: 0o600 });
+    const layered = loadLayeredEnv(dir, {});
+    assert.equal(layered.GEMINI_API_KEY, 'from-local');
+    assert.equal(layered.GEMINI_API_KEYS, 'spare');
+    const shelled = loadLayeredEnv(dir, { GEMINI_API_KEY: 'from-shell' });
+    assert.equal(shelled.GEMINI_API_KEY, 'from-shell');
   });
 });

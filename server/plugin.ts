@@ -1,6 +1,5 @@
-import path from 'node:path';
 import type { Plugin } from 'vite';
-import { loadEnvFile, mergeEnv } from './env-file.ts';
+import { loadLayeredEnv } from './env-file.ts';
 import { invokeGemini } from './gemini.ts';
 import { createBubbleMiddleware } from './http.ts';
 import { KeyRing } from './key-ring.ts';
@@ -9,7 +8,7 @@ import { RateGate } from './rate-gate.ts';
 import { loadBubbleSettings } from './settings.ts';
 
 export function loadLocalEnv(root = process.cwd()): Record<string, string | undefined> {
-  return mergeEnv(loadEnvFile(path.resolve(root, '.env')), process.env);
+  return loadLayeredEnv(root, process.env);
 }
 
 export function guardianBubblePlugin(root = process.cwd()): Plugin {

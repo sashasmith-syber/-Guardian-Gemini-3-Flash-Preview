@@ -49,6 +49,9 @@ function sendJson(res: ServerResponse, status: number, body: Record<string, unkn
   res.setHeader('content-type', 'application/json; charset=utf-8');
   res.setHeader('cache-control', 'no-store');
   res.setHeader('x-content-type-options', 'nosniff');
+  res.setHeader('referrer-policy', 'no-referrer');
+  res.setHeader('x-frame-options', 'DENY');
+  res.setHeader('permissions-policy', 'camera=(), microphone=(self), geolocation=()');
   res.end(payload);
 }
 

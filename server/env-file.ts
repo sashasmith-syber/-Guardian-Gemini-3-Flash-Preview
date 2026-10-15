@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import path from 'node:path';
 
 export function parseEnv(source: string): Record<string, string> {
   const out: Record<string, string> = {};
@@ -30,6 +31,15 @@ export function loadEnvFile(filePath: string): Record<string, string> {
     if (code === 'ENOENT') return {};
     throw err;
   }
+}
+
+export function loadLayeredEnv(
+  root: string,
+  processEnv: NodeJS.ProcessEnv,
+): Record<string, string | undefined> {
+  const base = loadEnvFile(path.join(root, '.env'));
+  const local = loadEnvFile(path.join(root, '.env.local'));
+  return mergeEnv({ ...base, ...local }, processEnv);
 }
 
 export function mergeEnv(

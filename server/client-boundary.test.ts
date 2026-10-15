@@ -21,6 +21,10 @@ describe('client boundary', () => {
     assert.equal(client.includes('process.env.API_KEY'), false);
     assert.equal(client.includes('@google/genai'), false);
     assert.equal(html.includes('@google/genai'), false);
+    assert.equal(html.includes('cdn.tailwindcss.com'), false);
+    assert.equal(html.includes('esm.sh'), false);
+    assert.equal(html.includes('fonts.googleapis.com'), false);
+    assert.equal(vite.includes("|| '127.0.0.1'"), true);
     assert.equal(client.includes("'/api/generate'"), true);
   });
 });
