@@ -12,6 +12,18 @@ dist
 dist-ssr
 *.local
 
+# Secrets — server-side safe bubble only
+.env
+.env.*
+!.env.example
+config.yaml
+config.yml
+secrets.json
+credentials.json
+service-account.json
+*.pem
+*.key
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
