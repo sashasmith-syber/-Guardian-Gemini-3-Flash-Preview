@@ -15,16 +15,25 @@ describe('client boundary', () => {
     const vite = source('vite.config.ts');
     const client = source('index.tsx');
     const html = source('index.html');
+    const terminal = source('components/GuardianTerminal.tsx');
+    const bubble = source('utils/bubbleClient.ts');
+    const browserSources = [client, terminal, bubble, source('components/Header.tsx')];
     assert.equal(vite.includes('process.env.API_KEY'), false);
     assert.equal(vite.includes('process.env.GEMINI_API_KEY'), false);
     assert.equal(vite.includes('JSON.stringify(env'), false);
-    assert.equal(client.includes('process.env.API_KEY'), false);
-    assert.equal(client.includes('@google/genai'), false);
+    for (const file of browserSources) {
+      assert.equal(file.includes('process.env.API_KEY'), false);
+      assert.equal(file.includes('process.env.GEMINI_API_KEY'), false);
+      assert.equal(file.includes('@google/genai'), false);
+      assert.equal(file.includes('VITE_GEMINI_API_KEY'), false);
+    }
     assert.equal(html.includes('@google/genai'), false);
     assert.equal(html.includes('cdn.tailwindcss.com'), false);
     assert.equal(html.includes('esm.sh'), false);
     assert.equal(html.includes('fonts.googleapis.com'), false);
     assert.equal(vite.includes("|| '127.0.0.1'"), true);
     assert.equal(client.includes("'/api/generate'"), true);
+    assert.equal(terminal.includes("'/api/transcribe'"), true);
+    assert.equal(terminal.includes("'/api/tts'"), true);
   });
 });

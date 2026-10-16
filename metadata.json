@@ -3,5 +3,6 @@
   "requestFramePermissions": [
     "microphone"
   ],
-  "name": "Guardian Console"
+  "name": "Guardian Console",
+  "majorCapabilities": []
 }
