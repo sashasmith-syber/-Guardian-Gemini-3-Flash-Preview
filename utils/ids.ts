@@ -1,0 +1,9 @@
+/** Collision-resistant client/server id helper (not cryptographic). */
+export function makeId(prefix: string): string {
+  const time = Date.now().toString(36);
+  const rand =
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID().replace(/-/g, '').slice(0, 10)
+      : Math.random().toString(36).slice(2, 12);
+  return `${prefix}-${time}-${rand}`;
+}

@@ -1,0 +1,8 @@
+{
+  "description": "Guardian Strategist V3.0 - Sovereign Enterprise AI Interface",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "name": "Guardian Console",
+  "majorCapabilities": []
+}
