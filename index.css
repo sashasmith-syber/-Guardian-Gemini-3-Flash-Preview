@@ -53,6 +53,13 @@ body::after {
   outline-offset: 2px;
 }
 
+/* #7ad7e0 on the #111622 field fill is 10.87:1. Opacity stays at 1 so
+   browsers do not dim the hint back under the 4.5:1 text floor. */
+.guardian-field::placeholder {
+  color: #7ad7e0;
+  opacity: 1;
+}
+
 @media (prefers-reduced-motion: reduce) {
   body::after {
     animation: none;

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { X, Server, Activity, Thermometer, ShieldAlert, RefreshCw, Lock, Zap } from 'lucide-react';
 import { TelemetryNode } from '../types';
 import { sound } from '../utils/soundEffects';
@@ -17,6 +17,15 @@ export const NodeInspectorModal: React.FC<NodeInspectorModalProps> = ({
   onSendToGuardian,
 }) => {
   const [actionNotice, setActionNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!node) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [node, onClose]);
 
   if (!node) return null;
 
@@ -72,8 +81,17 @@ export const NodeInspectorModal: React.FC<NodeInspectorModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-[#0b0e14] border border-[#00f2ff]/40 rounded-lg max-w-2xl w-full p-6 shadow-[0_0_30px_rgba(0,242,255,0.15)] flex flex-col gap-5 text-[#e0e0e0]">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="node-inspector-title"
+        onClick={(event) => event.stopPropagation()}
+        className="bg-[#0b0e14] border border-[#00f2ff]/40 rounded-lg max-w-2xl w-full p-6 shadow-[0_0_30px_rgba(0,242,255,0.15)] flex flex-col gap-5 text-[#e0e0e0]"
+      >
         
         {/* Header */}
         <div className="flex items-start justify-between border-b border-[#00f2ff]/20 pb-4">
@@ -83,7 +101,7 @@ export const NodeInspectorModal: React.FC<NodeInspectorModalProps> = ({
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-base font-bold text-white tracking-wide">{node.name}</h2>
+                <h2 id="node-inspector-title" className="text-base font-bold text-white tracking-wide">{node.name}</h2>
                 <span className="text-[10px] text-[#00f2ff] px-1.5 py-0.5 rounded border border-[#00f2ff]/30 bg-[#00f2ff]/10">
                   {node.id}
                 </span>
@@ -98,6 +116,7 @@ export const NodeInspectorModal: React.FC<NodeInspectorModalProps> = ({
               sound.playKeypressBlip();
               onClose();
             }}
+            aria-label="Close node inspector"
             className="p-1 rounded text-[#00f2ff]/60 hover:text-[#00f2ff] hover:bg-[#00f2ff]/10 transition-colors"
           >
             <X className="w-5 h-5" />
@@ -106,7 +125,7 @@ export const NodeInspectorModal: React.FC<NodeInspectorModalProps> = ({
 
         {/* Action feedback notice */}
         {actionNotice && (
-          <div className="p-2.5 rounded bg-[#00f2ff]/10 border border-[#00f2ff]/40 text-xs text-[#00f2ff] flex items-center gap-2 animate-pulse">
+          <div role="status" aria-live="polite" className="p-2.5 rounded bg-[#00f2ff]/10 border border-[#00f2ff]/40 text-xs text-[#00f2ff] flex items-center gap-2 animate-pulse">
             <Zap className="w-4 h-4 text-[#00f2ff]" />
             <span>{actionNotice}</span>
           </div>

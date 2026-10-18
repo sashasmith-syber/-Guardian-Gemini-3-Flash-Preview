@@ -98,6 +98,7 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="flex items-center gap-2 shrink-0">
           <button
             onClick={toggleSound}
+            aria-label={isMuted ? 'Unmute tactical audio' : 'Mute tactical audio'}
             title={isMuted ? 'Unmute tactical audio' : 'Mute tactical audio'}
             className="p-1.5 rounded border border-[#00f2ff]/20 text-[#00f2ff]/70 hover:text-[#00f2ff] hover:bg-[#00f2ff]/10 transition-colors"
           >
@@ -146,7 +147,7 @@ export const Header: React.FC<HeaderProps> = ({
           value={activeView}
           onChange={(e) => selectView(e.target.value as ConsoleView)}
           aria-label="Switch console view"
-          className="w-full bg-[#111622] border border-[#00f2ff]/30 rounded text-xs text-[#00f2ff] px-3 py-2 focus:outline-none focus:border-[#00f2ff] font-mono"
+          className="w-full bg-[#111622] border border-[#00f2ff]/30 rounded text-xs text-[#00f2ff] px-3 py-2 focus:border-[#00f2ff] font-mono"
         >
           {NAV_ITEMS.map((item) => (
             <option key={item.id} value={item.id}>

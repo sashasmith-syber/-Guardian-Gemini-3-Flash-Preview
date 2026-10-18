@@ -15,6 +15,7 @@ import {
 } from './utils/mockData';
 import { sound } from './utils/soundEffects';
 import { bubblePost, imagePayload } from './utils/bubbleClient';
+import { csvCell } from './utils/csv';
 import { Header } from './components/Header';
 import { DashboardOverview } from './components/DashboardOverview';
 import { TelemetryGrid } from './components/TelemetryGrid';
@@ -390,7 +391,9 @@ Confirmed. Action underway.
     rows.push('--- TELEMETRY NODES ---');
     rows.push('ID,Name,Region,Tier,Status,CPU(%),RAM(%),Thermal(C),Latency(ms)');
     nodes.forEach((n) => {
-      rows.push(`"${n.id}","${n.name}","${n.region}","${n.tier}","${n.status}",${n.cpuLoad},${n.memoryUsage},${n.thermalC},${n.latencyMs}`);
+      rows.push(
+        [csvCell(n.id), csvCell(n.name), csvCell(n.region), csvCell(n.tier), csvCell(n.status), n.cpuLoad, n.memoryUsage, n.thermalC, n.latencyMs].join(','),
+      );
     });
     rows.push('');
 
@@ -398,7 +401,9 @@ Confirmed. Action underway.
     rows.push('--- STRATEGIC ALERTS ---');
     rows.push('ID,Timestamp,Severity,Status,ImpactScore,Title,Origin,Target');
     alerts.forEach((a) => {
-      rows.push(`"${a.id}","${a.timestamp}","${a.severity}","${a.status}",${a.impactScore},"${a.title.replace(/"/g, '""')}","${a.origin}","${a.targetSubsystem}"`);
+      rows.push(
+        [csvCell(a.id), csvCell(a.timestamp), csvCell(a.severity), csvCell(a.status), a.impactScore, csvCell(a.title), csvCell(a.origin), csvCell(a.targetSubsystem)].join(','),
+      );
     });
     rows.push('');
 
@@ -406,7 +411,7 @@ Confirmed. Action underway.
     rows.push('--- CONSOLE DIRECTIVES ---');
     rows.push('Role,Timestamp,Content');
     messages.forEach((m) => {
-      rows.push(`"${m.role}","${m.timestamp}","${m.content.replace(/"/g, '""')}"`);
+      rows.push([csvCell(m.role), csvCell(m.timestamp), csvCell(m.content)].join(','));
     });
 
     const csvBlob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
@@ -417,6 +422,7 @@ Confirmed. Action underway.
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 0);
   };
 
   return (
