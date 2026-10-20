@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import type { BubbleOp, BubbleResult } from './bubble.ts';
 import { KeyRing } from './key-ring.ts';
@@ -114,6 +115,12 @@ describe('vercel bubble adapter', () => {
     );
     assert.equal(first.status, 200);
     assert.equal(second.status, 429);
+  });
+
+  it('keeps image analysis on the live text model', () => {
+    const source = readFileSync(new URL('./gemini.ts', import.meta.url), 'utf8');
+    assert.equal(source.includes('gemini-3-pro-preview'), false);
+    assert.equal(source.includes("const TEXT_MODEL = 'gemini-3-flash-preview'"), true);
   });
 
   it('caps the production body limit at the platform maximum and reads only server env', () => {

@@ -3,7 +3,6 @@ import type { BubbleOp, BubbleResult } from './bubble.ts';
 import { SYSTEM_INSTRUCTION } from './persona.ts';
 
 const TEXT_MODEL = 'gemini-3-flash-preview';
-const IMAGE_MODEL = 'gemini-3-pro-preview';
 const TTS_MODEL = 'gemini-2.5-flash-preview-tts';
 
 export async function invokeGemini(apiKey: string, op: BubbleOp): Promise<BubbleResult> {
@@ -51,7 +50,7 @@ export async function invokeGemini(apiKey: string, op: BubbleOp): Promise<Bubble
     parts.push({ inlineData: { data: op.image.data, mimeType: op.image.mimeType } });
   }
   const response = await ai.models.generateContent({
-    model: op.image ? IMAGE_MODEL : TEXT_MODEL,
+    model: TEXT_MODEL,
     contents: [{ role: 'user', parts }],
     config: {
       systemInstruction: SYSTEM_INSTRUCTION,
