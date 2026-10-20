@@ -33,7 +33,14 @@ describe('client boundary', () => {
     assert.equal(html.includes('fonts.googleapis.com'), false);
     assert.equal(vite.includes("|| '127.0.0.1'"), true);
     assert.equal(client.includes("'/api/generate'"), true);
+    assert.equal(client.includes('gemini-3.8-flash'), false);
     assert.equal(terminal.includes("'/api/transcribe'"), true);
     assert.equal(terminal.includes("'/api/tts'"), true);
+    for (const route of ['api/health.ts', 'api/generate.ts', 'api/transcribe.ts', 'api/tts.ts']) {
+      const file = source(route);
+      assert.equal(file.includes('handleBubbleRequest'), true);
+      assert.equal(file.includes('GEMINI_API_KEY'), false);
+      assert.equal(file.includes('@google/genai'), false);
+    }
   });
 });

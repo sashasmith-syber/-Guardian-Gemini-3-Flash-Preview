@@ -354,7 +354,7 @@ OPERATOR: Upstream API link reported transport variance (${error?.message || 'So
 1. **Network Link**: Upstream gateway latency jitter detected.
 2. **Local Sanctuary Telemetry**: 100% operational. Ingress stream: ${metrics.ingressBandwidthGbps.toFixed(2)} GB/s.
 3. **Data Integrity**: Cryptographic hashes for all 12 nodes verified against local enclave state. Zero unauthorized data egress.
-4. **Autonomous Action**: Transport pipeline re-anchored to \`gemini-3.8-flash\` protocol.
+4. **Autonomous Action**: Local diagnostic retained this turn. The upstream bubble returned no Guardian reply, so no model protocol was switched.
 
 Confirmed. Action underway.
 
