@@ -167,6 +167,7 @@ export async function dispatchBubble(request: BubbleRequest, deps: BubbleDeps): 
     return {
       status: 200,
       body: {
+        ok: true,
         bubble: 'closed',
         ready: deps.ring.size > 0 && cooling < deps.ring.size,
         strategy: deps.ring.strategy,
