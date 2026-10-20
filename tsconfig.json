@@ -24,6 +24,8 @@
       ]
     },
     "allowImportingTsExtensions": true,
+    // Vercel renames emitted files to .js. This rewrites the import specifiers to match, otherwise the lambda crashes on load.
+    "rewriteRelativeImportExtensions": true,
     "noEmit": true
   }
 }

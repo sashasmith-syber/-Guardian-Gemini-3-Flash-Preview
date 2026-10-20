@@ -1,3 +1,4 @@
+import { ATTACHMENT_TOO_LARGE, PLATFORM_BODY_LIMIT } from '../utils/imageBudget.ts';
 import { dispatchBubble, type BubbleDeps, type BubbleResponse } from './bubble.ts';
 import { isJsonContentType } from './http.ts';
 import { invokeGemini } from './gemini.ts';
@@ -5,9 +6,6 @@ import { KeyRing } from './key-ring.ts';
 import { redact } from './redact.ts';
 import { RateGate } from './rate-gate.ts';
 import { loadBubbleSettings } from './settings.ts';
-
-// Vercel rejects request bodies above 4.5 MB before the function runs.
-const PLATFORM_BODY_CAP = 4_500_000;
 
 export type VercelBubbleDeps = BubbleDeps & {
   maxBodyBytes: number;
@@ -21,7 +19,7 @@ export function productionBubbleDeps(env: Record<string, string | undefined>): V
   return {
     ring,
     gate: new RateGate(settings.rateLimit, settings.rateWindowMs),
-    maxBodyBytes: Math.min(settings.maxBodyBytes, PLATFORM_BODY_CAP),
+    maxBodyBytes: Math.min(settings.maxBodyBytes, PLATFORM_BODY_LIMIT),
     invoke: invokeGemini,
     log: (line) => {
       console.error(redact(line, ring.secrets()));
@@ -91,7 +89,7 @@ export async function handleBubbleRequest(
       return jsonResponse({ status: 400, body: { error: 'Request body must be JSON.' } });
     }
     if (Buffer.byteLength(raw) > deps.maxBodyBytes) {
-      return jsonResponse({ status: 413, body: { error: 'Request body is too large.' } });
+      return jsonResponse({ status: 413, body: { error: ATTACHMENT_TOO_LARGE } });
     }
     try {
       body = raw.length === 0 ? {} : JSON.parse(raw) as unknown;
