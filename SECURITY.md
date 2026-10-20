@@ -9,6 +9,7 @@ Open a private GitHub security advisory for this repository. Do not paste API ke
 ## Key handling
 
 - Put Gemini keys in `.env` or `.env.local`. Both files are gitignored.
+- On Vercel, put the same names in the project environment. The `api/` functions read them on the server. A `VITE_` prefix would ship the key to the browser.
 - `.env.example` is the only env file that belongs in git, and its key fields stay empty.
 - Never prefix a Gemini key with `VITE_`.
 - The bubble drops a key from rotation after an authentication or quota failure until `GEMINI_KEY_COOLDOWN_MS` elapses.
