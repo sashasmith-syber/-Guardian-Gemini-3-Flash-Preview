@@ -303,13 +303,18 @@ export const TelemetryGrid: React.FC<TelemetryGridProps> = ({
           <div className="flex flex-wrap items-center gap-2">
             {/* Search */}
             <div className="relative">
-              <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-[#00f2ff]/50" />
+              <Search aria-hidden="true" className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-[#00f2ff]/50" />
+              <label className="sr-only" htmlFor="node-search">
+                Search nodes or region
+              </label>
               <input
-                type="text"
+                id="node-search"
+                type="search"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
+                autoComplete="off"
                 placeholder="Search nodes or region..."
-                className="bg-[#111622] border border-[#00f2ff]/30 rounded text-xs pl-8 pr-3 py-1 text-white placeholder-[#00f2ff]/30 focus:outline-none focus:border-[#00f2ff] w-48 sm:w-56"
+                className="guardian-field bg-[#111622] border border-[#00f2ff]/30 rounded text-xs pl-8 pr-3 py-1 text-white focus:border-[#00f2ff] w-48 sm:w-56"
               />
             </div>
 
@@ -322,6 +327,7 @@ export const TelemetryGrid: React.FC<TelemetryGridProps> = ({
                     sound.playKeypressBlip();
                     setFilterTier(tier);
                   }}
+                  aria-pressed={filterTier === tier}
                   className={`px-2 py-1 text-[10px] font-medium rounded transition-colors whitespace-nowrap ${
                     filterTier === tier
                       ? 'bg-[#00f2ff] text-black font-semibold'
@@ -340,7 +346,7 @@ export const TelemetryGrid: React.FC<TelemetryGridProps> = ({
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value as any)}
                 aria-label="Sort telemetry nodes"
-                className="bg-[#111622] border border-[#00f2ff]/30 text-xs text-[#00f2ff] rounded px-2 py-1 focus:outline-none"
+                className="bg-[#111622] border border-[#00f2ff]/30 text-xs text-[#00f2ff] rounded px-2 py-1"
               >
                 <option value="load">Highest Load</option>
                 <option value="latency">Lowest Latency</option>
@@ -350,20 +356,27 @@ export const TelemetryGrid: React.FC<TelemetryGridProps> = ({
           </div>
         </div>
 
-        {/* Nodes Grid */}
+        {processedNodes.length === 0 ? (
+          <div className="p-8 text-center bg-[#0b0e14] border border-[#00f2ff]/10 rounded-md text-[#888]">
+            <p className="text-sm font-semibold text-white">No matching enclaves</p>
+            <p className="text-xs text-[#888] mt-1">No nodes match the active filter criteria.</p>
+          </div>
+        ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
           {processedNodes.map((node) => {
             const isQuarantined = node.status === 'QUARANTINED';
             const isAudited = node.status === 'AUDIT_ACTIVE';
 
             return (
-              <div
+              <button
+                type="button"
                 key={node.id}
                 onClick={() => {
                   sound.playKeypressBlip();
                   onSelectNode(node);
                 }}
-                className={`p-3.5 rounded-md border transition-all cursor-pointer relative group flex flex-col justify-between ${
+                aria-label={`Inspect ${node.name}`}
+                className={`p-3.5 rounded-md border transition-all cursor-pointer relative group flex flex-col justify-between text-left w-full ${
                   isQuarantined
                     ? 'bg-red-950/20 border-red-500/50 hover:border-red-400'
                     : isAudited
@@ -375,11 +388,11 @@ export const TelemetryGrid: React.FC<TelemetryGridProps> = ({
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <div className="flex items-center gap-2">
-                      <h4 className="text-xs font-bold text-white group-hover:text-[#00f2ff] transition-colors">
+                      <span className="text-xs font-bold text-white group-hover:text-[#00f2ff] transition-colors">
                         {node.name}
-                      </h4>
+                      </span>
                     </div>
-                    <p className="text-[10px] text-[#888] mt-0.5">{node.region}</p>
+                    <span className="block text-[10px] text-[#888] mt-0.5">{node.region}</span>
                   </div>
                   <span
                     className={`text-[9px] font-mono px-1.5 py-0.5 rounded border whitespace-nowrap shrink-0 ${
@@ -438,14 +451,15 @@ export const TelemetryGrid: React.FC<TelemetryGridProps> = ({
                     <span className="text-[#666]">/</span>
                     <span className="text-white/80 tabular-nums">↑{node.egressRateMbps}</span>
                   </div>
-                  <span className="text-[9px] text-[#00f2ff] opacity-0 group-hover:opacity-100 transition-opacity">
+                  <span className="text-[9px] text-[#00f2ff] opacity-0 group-hover:opacity-100 group-focus:opacity-100 transition-opacity">
                     Inspect →
                   </span>
                 </div>
-              </div>
+              </button>
             );
           })}
         </div>
+        )}
       </div>
 
     </div>

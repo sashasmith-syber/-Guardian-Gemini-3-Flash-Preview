@@ -209,13 +209,15 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
             {/* Key Edge Node Tiles */}
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-1">
               {keyNodes.map((node) => (
-                <div
+                <button
+                  type="button"
                   key={node.id}
                   onClick={() => {
                     sound.playKeypressBlip();
                     onSelectNode(node);
                   }}
-                  className="p-2.5 rounded bg-[#111622] border border-[#00f2ff]/15 hover:border-[#00f2ff]/60 cursor-pointer transition-all flex flex-col justify-between group"
+                  aria-label={`Inspect ${node.name}`}
+                  className="p-2.5 rounded bg-[#111622] border border-[#00f2ff]/15 hover:border-[#00f2ff]/60 cursor-pointer transition-all flex flex-col justify-between group text-left w-full"
                 >
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] font-bold text-white group-hover:text-[#00f2ff] truncate">
@@ -237,7 +239,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
                       style={{ width: `${node.cpuLoad}%` }}
                     />
                   </div>
-                </div>
+                </button>
               ))}
             </div>
           </div>

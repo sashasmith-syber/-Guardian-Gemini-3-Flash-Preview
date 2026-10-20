@@ -36,4 +36,20 @@ describe('client boundary', () => {
     assert.equal(terminal.includes("'/api/transcribe'"), true);
     assert.equal(terminal.includes("'/api/tts'"), true);
   });
+
+  it('keeps placeholder hints above the text contrast floor and named', () => {
+    const terminal = source('components/GuardianTerminal.tsx');
+    const alerts = source('components/StrategicAlertFeed.tsx');
+    const telemetry = source('components/TelemetryGrid.tsx');
+    for (const file of [terminal, alerts, telemetry]) {
+      assert.equal(file.includes('placeholder-[#00f2ff]/30'), false);
+      assert.equal(file.includes('guardian-field'), true);
+    }
+    assert.equal(terminal.includes('htmlFor="guardian-directive"'), true);
+    assert.equal(terminal.includes('SYNCHRONIZING CORE...'), false);
+    assert.equal(alerts.includes('htmlFor="alert-search"'), true);
+    assert.equal(telemetry.includes('htmlFor="node-search"'), true);
+    assert.equal(telemetry.includes('No nodes match the active filter criteria.'), true);
+    assert.equal(source('index.css').includes('color: #7ad7e0'), true);
+  });
 });
