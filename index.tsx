@@ -16,6 +16,7 @@ import {
 } from './utils/mockData';
 import { sound } from './utils/soundEffects';
 import { bubblePost, imagePayload } from './utils/bubbleClient';
+import { ATTACHMENT_TOO_LARGE } from './utils/imageBudget';
 import { Header } from './components/Header';
 import { DashboardOverview } from './components/DashboardOverview';
 import { TelemetryGrid } from './components/TelemetryGrid';
@@ -346,7 +347,18 @@ Confirmed. Action underway.
       }
     } catch (error: any) {
       console.error('Guardian generation error:', error);
-      
+      const message = String(error?.message || '');
+      if (message === ATTACHMENT_TOO_LARGE) {
+        setMessages((prev) => [...prev, {
+          id: `msg-${Date.now()}-diagnostic`,
+          role: 'GUARDIAN',
+          content: message,
+          timestamp: new Date().toLocaleTimeString(),
+        }]);
+        sound.playTacticalPing();
+        return;
+      }
+
       const forensicDiagnostic = `### FORENSIC DIAGNOSTIC & TACTICAL ILLUMINATION
 OPERATOR: Upstream API link reported transport variance (${error?.message || 'Socket timeout'}). Local sovereign enclave immediately took custody of command processing.
 

@@ -18,6 +18,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ChatMessage, StrategicAlert } from '../types';
 import { bubblePost } from '../utils/bubbleClient';
+import { prepareImageFile } from '../utils/prepareImage';
 import { sound } from '../utils/soundEffects';
 
 interface GuardianTerminalProps {
@@ -70,6 +71,7 @@ export const GuardianTerminal: React.FC<GuardianTerminalProps> = ({
 }) => {
   const [input, setInput] = useState('');
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [imageNote, setImageNote] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [isSynthesizingTTS, setIsSynthesizingTTS] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -90,15 +92,18 @@ export const GuardianTerminal: React.FC<GuardianTerminalProps> = ({
     }
   }, [pendingDirective, onClearPendingDirective]);
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setSelectedImage(reader.result as string);
-        sound.playTacticalPing();
-      };
-      reader.readAsDataURL(file);
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const prepared = await prepareImageFile(file);
+      setSelectedImage(prepared.dataUrl);
+      setImageNote(prepared.scaled ? 'IMAGE_BUFFERED: SCALED UNDER THE 4.5 MB LINK LIMIT' : null);
+      sound.playTacticalPing();
+    } catch (err) {
+      setSelectedImage(null);
+      setImageNote(err instanceof Error ? err.message : 'Image could not be prepared.');
     }
   };
 
@@ -382,15 +387,21 @@ export const GuardianTerminal: React.FC<GuardianTerminalProps> = ({
 
       {/* Input Area */}
       <form onSubmit={handleSubmit} className="p-3 bg-[#07090e] border-t border-[#00f2ff]/20">
+        {imageNote && !selectedImage && (
+          <p className="mb-2 text-[10px] text-red-300 font-mono">{imageNote}</p>
+        )}
         {selectedImage && (
           <div className="mb-2 flex items-center justify-between p-2 rounded bg-[#111622] border border-[#00f2ff]/30 text-xs">
             <div className="flex items-center gap-2">
               <img src={selectedImage} alt="Preview" className="w-10 h-10 object-cover rounded border border-[#00f2ff]/40" />
-              <span className="text-[10px] text-[#00f2ff]">IMAGE_BUFFERED: READY FOR MULTIMODAL AUDIT</span>
+              <span className="text-[10px] text-[#00f2ff]">{imageNote ?? 'IMAGE_BUFFERED: READY FOR MULTIMODAL AUDIT'}</span>
             </div>
             <button
               type="button"
-              onClick={() => setSelectedImage(null)}
+              onClick={() => {
+                setSelectedImage(null);
+                setImageNote(null);
+              }}
               className="p-1 text-red-400 hover:text-red-300"
             >
               <X className="w-4 h-4" />

@@ -17,7 +17,14 @@ describe('client boundary', () => {
     const html = source('index.html');
     const terminal = source('components/GuardianTerminal.tsx');
     const bubble = source('utils/bubbleClient.ts');
-    const browserSources = [client, terminal, bubble, source('components/Header.tsx')];
+    const browserSources = [
+      client,
+      terminal,
+      bubble,
+      source('components/Header.tsx'),
+      source('utils/prepareImage.ts'),
+      source('utils/imageBudget.ts'),
+    ];
     assert.equal(vite.includes('process.env.API_KEY'), false);
     assert.equal(vite.includes('process.env.GEMINI_API_KEY'), false);
     assert.equal(vite.includes('JSON.stringify(env'), false);
@@ -34,6 +41,7 @@ describe('client boundary', () => {
     assert.equal(vite.includes("|| '127.0.0.1'"), true);
     assert.equal(client.includes("'/api/generate'"), true);
     assert.equal(client.includes('gemini-3.8-flash'), false);
+    assert.equal(terminal.includes('prepareImageFile'), true);
     assert.equal(terminal.includes("'/api/transcribe'"), true);
     assert.equal(terminal.includes("'/api/tts'"), true);
     for (const route of ['api/health.ts', 'api/generate.ts', 'api/transcribe.ts', 'api/tts.ts']) {

@@ -89,6 +89,7 @@ describe('vercel bubble adapter', () => {
       deps(invoke, { maxBodyBytes: 4 }),
     );
     assert.equal(oversized.status, 413);
+    assert.equal((await oversized.json() as { error?: string }).error, 'Attachment is too large for the upstream link. It must stay under 4.5 MB after encoding.');
 
     const foreign = await handleBubbleRequest(
       post('/api/generate', '{"text":"status"}', {
