@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import path from 'node:path';
 import { describe, it } from 'node:test';
+import type ts from 'typescript';
+
+const typescript = createRequire(import.meta.url)('typescript') as typeof ts;
 import type { BubbleOp, BubbleResult } from './bubble.ts';
 import { KeyRing } from './key-ring.ts';
 import { RateGate } from './rate-gate.ts';
@@ -132,5 +137,43 @@ describe('vercel bubble adapter', () => {
     });
     assert.equal(configured.maxBodyBytes, 4_500_000);
     assert.deepEqual(configured.ring.secrets(), [SECRET]);
+  });
+});
+
+describe('vercel typescript emit', () => {
+  it('rewrites .ts import specifiers to .js so the lambda can load', () => {
+    const root = path.resolve(new URL('..', import.meta.url).pathname);
+    const configPath = path.join(root, 'tsconfig.json');
+    const read = typescript.readConfigFile(configPath, typescript.sys.readFile);
+    const config = read.config;
+    config.compilerOptions = {
+      ...config.compilerOptions,
+      declaration: false,
+      noEmit: false,
+      sourceMap: false,
+    };
+    const parsed = typescript.parseJsonConfigFileContent(config, typescript.sys, root, undefined, configPath);
+    const entry = path.join(root, 'server/vercel.ts');
+    const host: ts.LanguageServiceHost = {
+      getScriptFileNames: () => [entry],
+      getScriptVersion: () => '1',
+      getScriptSnapshot: (fileName) => {
+        const text = typescript.sys.readFile(fileName);
+        return text === undefined ? undefined : typescript.ScriptSnapshot.fromString(text);
+      },
+      getCurrentDirectory: () => root,
+      getCompilationSettings: () => parsed.options,
+      getDefaultLibFileName: (options) => typescript.getDefaultLibFilePath(options),
+      fileExists: typescript.sys.fileExists,
+      readFile: typescript.sys.readFile,
+      readDirectory: typescript.sys.readDirectory,
+      directoryExists: typescript.sys.directoryExists,
+      getDirectories: typescript.sys.getDirectories,
+    };
+    const emitted = typescript.createLanguageService(host).getEmitOutput(entry);
+    const javascript = emitted.outputFiles.find((file) => file.name.endsWith('.js'))?.text ?? '';
+    assert.match(javascript, /from ["']\.\/bubble\.js["']/);
+    assert.match(javascript, /from ["']\.\.\/utils\/imageBudget\.js["']/);
+    assert.equal(javascript.includes('.ts'), false);
   });
 });
