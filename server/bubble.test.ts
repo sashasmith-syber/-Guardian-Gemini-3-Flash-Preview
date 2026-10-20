@@ -117,6 +117,7 @@ describe('safe bubble', () => {
       { ring: ring(), gate: new RateGate(10, 60_000), invoke: async () => ({ text: '' }), now },
     );
     assert.equal(health.status, 200);
+    assert.equal(health.body.ok, true);
     assert.equal(health.body.bubble, 'closed');
     assert.equal(health.body.keys, 2);
     assert.equal(JSON.stringify(health.body).includes(SECRET_A), false);
@@ -146,6 +147,12 @@ describe('bubble http boundary', () => {
     try {
       const page = await fetch(`${base}/`);
       assert.equal(page.status, 204);
+      const health = await fetch(`${base}/api/health`);
+      const healthBody = await health.json() as { ok?: boolean; ready?: boolean };
+      assert.equal(health.status, 200);
+      assert.equal(health.headers.get('content-type'), 'application/json; charset=utf-8');
+      assert.equal(healthBody.ok, true);
+      assert.equal(healthBody.ready, false);
       const oversized = await fetch(`${base}/api/generate`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', host: `127.0.0.1:${port}` },
