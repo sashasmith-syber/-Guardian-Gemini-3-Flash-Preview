@@ -25,7 +25,7 @@ jobs:
       DD_APP_KEY: ${{ secrets.DD_APP_KEY }}
     steps:
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Check Datadog keys
         id: keys
@@ -39,7 +39,7 @@ jobs:
 
       - name: Run Datadog Synthetic tests
         if: steps.keys.outputs.present == 'true'
-        uses: DataDog/synthetics-ci-github-action@87b505388a22005bb8013481e3f73a367b9a53eb # v1.4.0
+        uses: DataDog/synthetics-ci-github-action@7039855343386c30068a97ca381e68ea405e8539 # v4.1.1
         with:
           api_key: ${{ secrets.DD_API_KEY }}
           app_key: ${{ secrets.DD_APP_KEY }}
