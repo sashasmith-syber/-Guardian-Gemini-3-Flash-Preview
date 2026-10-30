@@ -26,4 +26,4 @@ The dev server listens on `127.0.0.1:3000`. Chat, transcription, and speech go t
 
 The Vite build is static. Chat, transcription, and speech on Vercel run as Functions in `api/`, through the same safe bubble. Set `GEMINI_API_KEY` in the Vercel project environment, and put any failover keys in `GEMINI_API_KEYS`. Do not use a `VITE_` prefix. Save the variables, then redeploy so the functions can read them.
 
-`GET /api/health` reports `ready: true` when a key is configured and not cooling down. With no key, generate returns "API interface is not configured." and the console uses its local enclave replies.
+`GET /api/health` reports `ready: true` when a key is configured and not cooling down. With no key, generate returns "API interface is not configured." The console shows an onboard banner and an honest offline reply — it does not invent tactical briefs.
