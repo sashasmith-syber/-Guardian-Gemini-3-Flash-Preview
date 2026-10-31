@@ -27,3 +27,13 @@ The dev server listens on `127.0.0.1:3000`. Chat, transcription, and speech go t
 The Vite build is static. Chat, transcription, and speech on Vercel run as Functions in `api/`, through the same safe bubble. Set `GEMINI_API_KEY` in the Vercel project environment, and put any failover keys in `GEMINI_API_KEYS`. Do not use a `VITE_` prefix. Save the variables, then redeploy so the functions can read them.
 
 `GET /api/health` reports `ready: true` when a key is configured and not cooling down. With no key, generate returns "API interface is not configured." The console shows an onboard banner and an honest offline reply — it does not invent tactical briefs.
+
+## Cloudflare Workers Builds (Previews)
+
+`wrangler.jsonc` includes an empty `previews` block required by `npx wrangler preview`. In the Workers Builds settings for this service:
+
+1. **Build command:** `npm run build` (writes Vite output to `dist/`)
+2. **Deploy command:** `npx wrangler preview` (or `npm run cf:preview` if you prefer build+preview in one step)
+3. Keep `GEMINI_API_KEY` as a build/runtime secret — never `VITE_`
+
+Note: Vercel `api/` Functions are not Cloudflare Workers routes. A Preview serves the static console; chat still needs a Worker (or Vercel) bubble for `/api/*`.
