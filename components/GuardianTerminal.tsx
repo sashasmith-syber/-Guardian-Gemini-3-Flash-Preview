@@ -16,8 +16,9 @@ import {
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ChatMessage, StrategicAlert } from '../types';
+import { ChatMessage } from '../types';
 import { bubblePost } from '../utils/bubbleClient';
+import { BubbleHealth } from '../utils/bubbleHealth';
 import { prepareImageFile } from '../utils/prepareImage';
 import { sound } from '../utils/soundEffects';
 
@@ -28,6 +29,9 @@ interface GuardianTerminalProps {
   onExportCsv: () => void;
   pendingDirective?: string | null;
   onClearPendingDirective?: () => void;
+  bubbleHealth?: BubbleHealth | null;
+  bubbleHealthKnown?: boolean;
+  onRefreshBubbleHealth?: () => void | Promise<void>;
 }
 
 // Decode base64 for TTS
@@ -68,13 +72,19 @@ export const GuardianTerminal: React.FC<GuardianTerminalProps> = ({
   onExportCsv,
   pendingDirective,
   onClearPendingDirective,
+  bubbleHealth = null,
+  bubbleHealthKnown = false,
+  onRefreshBubbleHealth,
 }) => {
   const [input, setInput] = useState('');
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [imageNote, setImageNote] = useState<string | null>(null);
+  const [sensorNote, setSensorNote] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [isSynthesizingTTS, setIsSynthesizingTTS] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const bubbleReady = bubbleHealthKnown && bubbleHealth?.ready === true;
+  const bubbleOffline = bubbleHealthKnown && !bubbleReady;
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -114,6 +124,7 @@ export const GuardianTerminal: React.FC<GuardianTerminalProps> = ({
       sound.playTacticalPing();
     } else {
       try {
+        setSensorNote(null);
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         const mediaRecorder = new MediaRecorder(stream);
         audioChunksRef.current = [];
@@ -139,20 +150,28 @@ export const GuardianTerminal: React.FC<GuardianTerminalProps> = ({
         sound.playTacticalPing();
       } catch (err) {
         console.error('Microphone access denied:', err);
+        setSensorNote('Microphone blocked or unavailable. Allow mic permission, then retry — no fake voice directive was inserted.');
       }
     }
   };
 
   const transcribeAudio = async (base64Audio: string) => {
     try {
+      setSensorNote(null);
       const response = await bubblePost<{ text?: string }>('/api/transcribe', {
         audioBase64: base64Audio,
         mimeType: 'audio/webm',
       });
-      setInput((prev) => (prev + ' ' + (response.text || '')).trim());
+      const text = (response.text || '').trim();
+      if (!text) {
+        setSensorNote('Transcription returned empty text. Speak again or type the directive — nothing was invented.');
+        return;
+      }
+      setInput((prev) => (prev + ' ' + text).trim());
     } catch (err) {
       console.error('Transcription error:', err);
-      setInput((prev) => (prev + ' OPERATOR directive captured from acoustic sensor array. Ready for execution.').trim());
+      const detail = err instanceof Error ? err.message : 'Transcription failed.';
+      setSensorNote(`Acoustic transcription failed: ${detail}. Type the directive manually — no placeholder text was inserted.`);
     }
   };
 
@@ -177,10 +196,14 @@ export const GuardianTerminal: React.FC<GuardianTerminalProps> = ({
       }
     } catch (err) {
       console.error('TTS Synthesis error:', err);
+      const detail = err instanceof Error ? err.message : 'TTS failed.';
       if ('speechSynthesis' in window) {
+        setSensorNote(`Bubble TTS failed (${detail}). Falling back to browser speechSynthesis.`);
         const cleanText = text.replace(/[*#_`]/g, '').slice(0, 320);
         const utterance = new SpeechSynthesisUtterance(cleanText);
         window.speechSynthesis.speak(utterance);
+      } else {
+        setSensorNote(`Bubble TTS failed (${detail}). No browser speechSynthesis available.`);
       }
     } finally {
       setIsSynthesizingTTS(false);
@@ -194,6 +217,8 @@ export const GuardianTerminal: React.FC<GuardianTerminalProps> = ({
     onSendMessage(input, selectedImage || undefined);
     setInput('');
     setSelectedImage(null);
+    setImageNote(null);
+    setSensorNote(null);
   };
 
   const copyMessage = (id: string, text: string) => {
@@ -237,6 +262,36 @@ export const GuardianTerminal: React.FC<GuardianTerminalProps> = ({
         </div>
       </div>
 
+      {bubbleOffline && (
+        <div className="px-3 py-2 bg-amber-950/50 border-b border-amber-500/40 text-amber-100 text-[11px] flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-start gap-2 min-w-0">
+            <ShieldAlert className="w-4 h-4 text-amber-300 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-bold tracking-wider uppercase text-amber-200">
+                Onboard required — bubble {bubbleHealth ? 'offline' : 'unreachable'}
+              </p>
+              <p className="text-amber-100/80 mt-0.5">
+                Set <code className="text-amber-50">GEMINI_API_KEY</code> in <code className="text-amber-50">.env</code>,
+                restart the server, then confirm <code className="text-amber-50">/api/health</code> shows{' '}
+                <code className="text-amber-50">ready: true</code>. Chat will not invent tactical briefs while closed.
+              </p>
+            </div>
+          </div>
+          {onRefreshBubbleHealth && (
+            <button
+              type="button"
+              onClick={() => {
+                sound.playTacticalPing();
+                void onRefreshBubbleHealth();
+              }}
+              className="shrink-0 px-2.5 py-1 rounded border border-amber-400/50 text-amber-100 hover:bg-amber-500/20 text-[10px] uppercase tracking-wider"
+            >
+              Re-probe health
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Message Stream */}
       <div className="flex-1 overflow-y-auto p-4 space-y-5 scrollbar-thin scrollbar-thumb-[#00f2ff]/20">
         {messages.length === 0 ? (
@@ -249,7 +304,9 @@ export const GuardianTerminal: React.FC<GuardianTerminalProps> = ({
                 Guardian Protocol Active & Awaiting Operator Directives
               </h3>
               <p className="text-xs text-[#00f2ff]/70 max-w-md mx-auto mt-1">
-                A sovereign intellect calibrated to deconstruct telemetry vectors, preserve sanctuary integrity, and execute illumination protocols.
+                {bubbleOffline
+                  ? 'Bubble closed. Complete the onboard banner steps before expecting live Guardian replies.'
+                  : 'Live bubble replies only — no synthetic enclave briefs. Enter a directive when ready.'}
               </p>
             </div>
 
@@ -387,6 +444,9 @@ export const GuardianTerminal: React.FC<GuardianTerminalProps> = ({
 
       {/* Input Area */}
       <form onSubmit={handleSubmit} className="p-3 bg-[#07090e] border-t border-[#00f2ff]/20">
+        {sensorNote && (
+          <p className="mb-2 text-[10px] text-amber-200 font-mono">{sensorNote}</p>
+        )}
         {imageNote && !selectedImage && (
           <p className="mb-2 text-[10px] text-red-300 font-mono">{imageNote}</p>
         )}

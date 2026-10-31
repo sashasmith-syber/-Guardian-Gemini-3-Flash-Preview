@@ -24,6 +24,7 @@ describe('client boundary', () => {
       source('components/Header.tsx'),
       source('utils/prepareImage.ts'),
       source('utils/imageBudget.ts'),
+      source('utils/bubbleHealth.ts'),
     ];
     assert.equal(vite.includes('process.env.API_KEY'), false);
     assert.equal(vite.includes('process.env.GEMINI_API_KEY'), false);
@@ -40,6 +41,9 @@ describe('client boundary', () => {
     assert.equal(html.includes('fonts.googleapis.com'), false);
     assert.equal(vite.includes("|| '127.0.0.1'"), true);
     assert.equal(client.includes("'/api/generate'"), true);
+    assert.equal(client.includes("'/api/health'") || source('utils/bubbleHealth.ts').includes("'/api/health'"), true);
+    assert.equal(client.includes('onboardGuardianReply'), true);
+    assert.equal(client.includes('TACTICAL INVESTIGATION BRIEF'), false);
     assert.equal(client.includes('gemini-3.8-flash'), false);
     assert.equal(terminal.includes('prepareImageFile'), true);
     assert.equal(terminal.includes("'/api/transcribe'"), true);

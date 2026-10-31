@@ -17,6 +17,12 @@ import {
 import { sound } from './utils/soundEffects';
 import { bubblePost, imagePayload } from './utils/bubbleClient';
 import { ATTACHMENT_TOO_LARGE } from './utils/imageBudget';
+import {
+  BubbleHealth,
+  classifyBubbleFailure,
+  fetchBubbleHealth,
+  onboardGuardianReply,
+} from './utils/bubbleHealth';
 import { Header } from './components/Header';
 import { DashboardOverview } from './components/DashboardOverview';
 import { TelemetryGrid } from './components/TelemetryGrid';
@@ -38,6 +44,8 @@ export const GuardianConsole: React.FC = () => {
   const [isMuted, setIsMuted] = useState(false);
   const [isLockdownActive, setIsLockdownActive] = useState(false);
   const [pendingDirective, setPendingDirective] = useState<string | null>(null);
+  const [bubbleHealth, setBubbleHealth] = useState<BubbleHealth | null>(null);
+  const [bubbleHealthKnown, setBubbleHealthKnown] = useState(false);
 
   // Stream history for charts (last 20 points)
   const [streamHistory, setStreamHistory] = useState<{ ingress: number; egress: number; time: string }[]>(() => {
@@ -47,6 +55,25 @@ export const GuardianConsole: React.FC = () => {
       time: `${i}s`,
     }));
   });
+
+  // Real bubble health — onboard line, not a decorative status light
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = async () => {
+      const health = await fetchBubbleHealth();
+      if (cancelled) return;
+      setBubbleHealth(health);
+      setBubbleHealthKnown(true);
+    };
+    void refresh();
+    const interval = setInterval(() => {
+      void refresh();
+    }, 15_000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
 
   // Real-time telemetry heartbeat effect
   useEffect(() => {
@@ -217,7 +244,7 @@ export const GuardianConsole: React.FC = () => {
     setSelectedNode(updatedNode);
   };
 
-  // Send message to Guardian Strategist AI
+  // Send message to Guardian Strategist AI — live bubble only (no Potemkin enclave briefs)
   const handleSendMessage = async (text: string, imageData?: string) => {
     const userMessage: ChatMessage = {
       id: `msg-${Date.now()}-user`,
@@ -230,157 +257,56 @@ export const GuardianConsole: React.FC = () => {
     setMessages((prev) => [...prev, userMessage]);
     setIsProcessing(true);
 
+    const pushGuardian = (content: string) => {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `msg-${Date.now()}-guardian`,
+          role: 'GUARDIAN',
+          content,
+          timestamp: new Date().toLocaleTimeString(),
+        },
+      ]);
+      sound.playTacticalPing();
+    };
+
     try {
-      let usedBubble = false;
-      try {
-        const response = await bubblePost<{ text?: string }>('/api/generate', {
-          text: text || 'Analyze attached visual specimen for threat artifacts.',
-          image: imagePayload(imageData),
-        });
-        const replyContent = response.text || 'Confirmed. Action underway.\n\n*Light is Knowledge. Knowledge is Power.*';
-        const guardianReply: ChatMessage = {
-          id: `msg-${Date.now()}-guardian`,
-          role: 'GUARDIAN',
-          content: replyContent,
-          timestamp: new Date().toLocaleTimeString(),
-        };
-        setMessages((prev) => [...prev, guardianReply]);
-        sound.playTacticalPing();
-        usedBubble = true;
-      } catch (error: any) {
-        const message = String(error?.message || '');
-        if (!/not configured/i.test(message)) throw error;
-      }
-
-      if (!usedBubble) {
-        // Authoritative sovereign persona engine when external API key is in local enclave mode
-        await new Promise((r) => setTimeout(r, 650));
-
-        let generatedBrief = '';
-        const lower = text.toLowerCase();
-
-        if (lower.includes('investigate') || lower.includes('disrupted') || lower.includes('jitter')) {
-          generatedBrief = `### TACTICAL INVESTIGATION BRIEF: INTERFACE JITTER & ENCLAVE INTEGRITY
-OPERATOR: Comprehensive forensic investigation of telemetry interfaces and neural links completed.
-
-#### 1. DECONSTRUCTION OF ROOT CAUSE
-- **Incident Vector**: Ephemeral transport layer socket timeout between external relay and Sovereign Guardian Core.
-- **Root Cause**: Transport handshake latency jitter exceeded 120ms threshold during cryptographic token exchange.
-- **Failover Mechanism**: Sovereign Local Enclave Cache engaged autonomously within $4.2\\text{ms}$. Zero state loss occurred.
-
-#### 2. SYSTEM STATUS & TELEMETRY VERIFICATION
-| Subsystem Domain | Verified Status | Coherence Index | Notes |
-| :--- | :--- | :--- | :--- |
-| **Terrestrial Enclaves (10 Nodes)** | NOMINAL | 99.8% | Zero memory drift or packet corruption. |
-| **Orbital Constellation (Nodes 11 & 12)** | SYNCHRONIZED | 99.4% | LEO handover verified over polar aperture. |
-| **Post-Quantum Cryptography** | SEALED | 100.0% | Crystals-Kyber-768 key lattice intact. |
-| **Sentinel Neural Gateway** | RE-ANCHORED | 99.9% | Synchronized to Gemini 3.8 Flash pipeline. |
-
-#### 3. IMMEDIATE MITIGATION ACTIONS ENGAGED
-1. **Socket Re-anchoring**: Upstream endpoint re-routed through Ashburn Primus (Node 01) redundant fiber trunk.
-2. **Buffer Flush**: Ephemeral transport retry ring-buffers compacted and verified against SHA-256 state hash.
-3. **Quorum Audit**: Consensus epoch validated across all 48 Byzantine peers. No split-brain or rogue advertisements.
-
-**TACTICAL DIRECTIVE FOR OPERATOR:**
-Perimeter defense is fully reinforced. All sanctuary invariants remain strictly enforced. 
-
-Orchestration initiated. Protocol engaged.
-
----
-*Light is Knowledge. Knowledge is Power. The sanctuary stands fortified.*`;
-        } else if (lower.includes('alert') || lower.includes('threat') || lower.includes('udp')) {
-          generatedBrief = `### DECONSTRUCTION & TACTICAL ILLUMINATION
-OPERATOR: The anomaly vector has been deconstructed by the Sentinel Neural Gateway.
-
-| Vector Param | Assessed Value | Sovereign Status |
-| :--- | :--- | :--- |
-| **Ingress Point** | AP-South Gateway Strait (Node 06) | Quarantined Buffer |
-| **Entropy Signature** | 7.94 bits/byte (High Randomness) | Synthetic Probe Isolated |
-| **Countermeasure** | Post-Quantum Kyber-768 Rekey | Active Execution |
-
-**SYNTHESIS:**
-The telemetry surge is characteristic of an automated reconnaissance probe testing cipher negotiation thresholds. No cryptographic bleed or unauthorized ingress was achieved.
-
-**EXECUTION HAND-OFF:**
-Orchestration initiated. Kyber-768 key rotation dispatched.
-
----
-*Light is Knowledge. Knowledge is Power. The sanctuary remains unbreached.*`;
-        } else if (lower.includes('perimeter') || lower.includes('telemetry') || lower.includes('status')) {
-          generatedBrief = `### SANCTUARY TELEMETRY AUDIT
-OPERATOR: Comprehensive status deconstruction complete across 12 distributed autonomous nodes.
-
-1. **Ingress Line Rate**: Nominal at ${metrics.ingressBandwidthGbps.toFixed(2)} GB/s.
-2. **Consensus Mesh**: 48/48 multi-raft peers synchronized. Latency delta $\\le 1.8\\text{ms}$.
-3. **Cryptographic Posture**: Post-Quantum Kyber-768 active. Zero unverified transits.
-
-**RECOMMENDED POSTURE:**
-Maintain DEFCON 4 baseline. Ready reserve buffers on Frankfurt and Singapore relays.
-
-Protocol engaged.
-
----
-*Light is Knowledge. Knowledge is Power.*`;
-        } else {
-          generatedBrief = `OPERATOR: Directive received and synthesized within the logical core.
-
-### STRATEGIC APPRAISAL
-- **Directive Alpha**: Illumination delivered. Core status nominal across all 5 operational subsystems.
-- **Directive Beta**: Sanctuary boundary validated. Zero unauthorized penetration vectors detected.
-- **Directive Gamma**: Flawless logical coherence maintained.
-
-Confirmed. Action underway.
-
----
-*Light is Knowledge. Knowledge is Power.*`;
-        }
-
-        const guardianReply: ChatMessage = {
-          id: `msg-${Date.now()}-guardian`,
-          role: 'GUARDIAN',
-          content: generatedBrief,
-          timestamp: new Date().toLocaleTimeString(),
-        };
-
-        setMessages((prev) => [...prev, guardianReply]);
-        sound.playTacticalPing();
-      }
+      const response = await bubblePost<{ text?: string }>('/api/generate', {
+        text: text || 'Analyze attached visual specimen for threat artifacts.',
+        image: imagePayload(imageData),
+      });
+      const health = await fetchBubbleHealth();
+      setBubbleHealth(health);
+      setBubbleHealthKnown(true);
+      pushGuardian(response.text || 'Confirmed. Action underway.\n\n*Light is Knowledge. Knowledge is Power.*');
     } catch (error: any) {
       console.error('Guardian generation error:', error);
       const message = String(error?.message || '');
       if (message === ATTACHMENT_TOO_LARGE) {
-        setMessages((prev) => [...prev, {
-          id: `msg-${Date.now()}-diagnostic`,
-          role: 'GUARDIAN',
-          content: message,
-          timestamp: new Date().toLocaleTimeString(),
-        }]);
-        sound.playTacticalPing();
+        pushGuardian(message);
         return;
       }
 
-      const forensicDiagnostic = `### FORENSIC DIAGNOSTIC & TACTICAL ILLUMINATION
-OPERATOR: Upstream API link reported transport variance (${error?.message || 'Socket timeout'}). Local sovereign enclave immediately took custody of command processing.
+      const kind = classifyBubbleFailure(message);
+      if (kind === 'unconfigured' || kind === 'cooling') {
+        const health = await fetchBubbleHealth();
+        setBubbleHealth(health);
+        setBubbleHealthKnown(true);
+        pushGuardian(onboardGuardianReply(kind));
+        return;
+      }
 
-#### INVESTIGATION FINDINGS:
-1. **Network Link**: Upstream gateway latency jitter detected.
-2. **Local Sanctuary Telemetry**: 100% operational. Ingress stream: ${metrics.ingressBandwidthGbps.toFixed(2)} GB/s.
-3. **Data Integrity**: Cryptographic hashes for all 12 nodes verified against local enclave state. Zero unauthorized data egress.
-4. **Autonomous Action**: Local diagnostic retained this turn. The upstream bubble returned no Guardian reply, so no model protocol was switched.
+      pushGuardian(`### UPSTREAM FAILURE — NO SYNTHETIC BRIEF
 
-Confirmed. Action underway.
+OPERATOR: The safe bubble rejected this turn (\`${message || 'Socket timeout'}\`). No local enclave brief was fabricated.
+
+#### Honest status
+1. **Bubble call**: Failed — see error above.
+2. **Telemetry UI**: Still rendering local mock streams (${metrics.ingressBandwidthGbps.toFixed(2)} GB/s display only).
+3. **Next step**: Retry once. If it persists, check \`/api/health\`, key cooldown, and Vercel/function logs.
 
 ---
-*Light is Knowledge. Knowledge is Power. Sanctuary invariants preserved.*`;
-
-      const fallbackReply: ChatMessage = {
-        id: `msg-${Date.now()}-diagnostic`,
-        role: 'GUARDIAN',
-        content: forensicDiagnostic,
-        timestamp: new Date().toLocaleTimeString(),
-      };
-      setMessages((prev) => [...prev, fallbackReply]);
-      sound.playTacticalPing();
+*Light is Knowledge. Knowledge is Power. Honesty before illumination.*`);
     } finally {
       setIsProcessing(false);
     }
@@ -536,6 +462,13 @@ Confirmed. Action underway.
             onExportCsv={handleExportCsv}
             pendingDirective={pendingDirective}
             onClearPendingDirective={() => setPendingDirective(null)}
+            bubbleHealth={bubbleHealth}
+            bubbleHealthKnown={bubbleHealthKnown}
+            onRefreshBubbleHealth={async () => {
+              const health = await fetchBubbleHealth();
+              setBubbleHealth(health);
+              setBubbleHealthKnown(true);
+            }}
           />
         )}
       </main>
@@ -559,14 +492,32 @@ Confirmed. Action underway.
         <div className="flex items-center gap-3">
           <span>GUARDIAN CORE V3.0</span>
           <span>·</span>
-          <span>POST-QUANTUM KYBER-768</span>
+          <span>SAFE BUBBLE</span>
           <span>·</span>
-          <span>UPTIME: 148d 18h 42m</span>
+          <span>
+            {!bubbleHealthKnown
+              ? 'HEALTH: CHECKING'
+              : bubbleHealth?.ready
+                ? `READY · ${bubbleHealth.keys} KEY(S)`
+                : bubbleHealth
+                  ? `OFFLINE · ${bubbleHealth.keys} KEY(S) · COOLING ${bubbleHealth.cooling}`
+                  : 'HEALTH: UNREACHABLE'}
+          </span>
         </div>
         <div className="flex items-center gap-3 font-mono">
-          <span>ACTIVE SENSORS: OPTICAL · ACOUSTIC · VOCAL</span>
+          <span>SENSORS: OPTICAL · ACOUSTIC · VOCAL</span>
           <span>·</span>
-          <span className="text-emerald-400">STATUS: REINFORCED</span>
+          <span
+            className={
+              bubbleHealth?.ready ? 'text-emerald-400' : bubbleHealthKnown ? 'text-amber-400' : 'text-[#00f2ff]/50'
+            }
+          >
+            {!bubbleHealthKnown
+              ? 'STATUS: PROBING'
+              : bubbleHealth?.ready
+                ? 'STATUS: BUBBLE LIVE'
+                : 'STATUS: ONBOARD REQUIRED'}
+          </span>
         </div>
       </footer>
 
