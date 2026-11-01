@@ -182,6 +182,10 @@ describe('vercel bubble adapter', () => {
     const source = readFileSync(new URL('./gemini.ts', import.meta.url), 'utf8');
     assert.equal(source.includes('gemini-3-pro-preview'), false);
     assert.equal(source.includes("const TEXT_MODEL = 'gemini-3-flash-preview'"), true);
+    assert.match(source, /const PROVIDER_TIMEOUT_MS = 40_000/);
+    assert.match(source, /httpOptions: \{ timeout: PROVIDER_TIMEOUT_MS \}/);
+    assert.match(source, /const MAX_OUTPUT_TOKENS = 1024/);
+    assert.equal((source.match(/maxOutputTokens:/g) ?? []).length, 3);
   });
 
   it('caps the production body limit at the platform maximum and reads only server env', () => {
