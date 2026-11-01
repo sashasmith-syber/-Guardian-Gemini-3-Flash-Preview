@@ -26,6 +26,8 @@ The dev server listens on `127.0.0.1:3000`. Chat, transcription, and speech go t
 
 The Vite build is static (`npm run build`, output `dist/`). Vercel deploys `api/` as Node.js Functions and applies the response security headers in `vercel.json`.
 
+The reviewed target is the existing Vercel project `guardian-gemini-3-flash-preview` (Vite, Node.js 24.x). Its observed Deployment Protection scope was `all_except_custom_domains`; re-check the live setting with the operator. Project/runtime metadata and Deployment Protection do not replace the application authentication below.
+
 1. In the existing Vercel project, confirm the Vite framework preset, project root, and Node.js 24.x runtime. The generation, transcription, and TTS functions have a 60-second platform duration; Gemini requests time out after 40 seconds.
 2. Add the following server-only variables under the Vercel project’s Environment Variables. Set values separately for Preview and Production; use distinct Gemini credentials for Preview when possible. Never add a `VITE_` prefix.
    - Required: `GEMINI_API_KEY`, `GUARDIAN_OPERATOR_PASSWORD`

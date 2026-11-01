@@ -25,6 +25,8 @@ The sliding-window rate gate is process-local, with bounded client state. Vercel
 
 `GET /api/health` is intentionally public and reports only readiness; it does not reveal key counts or key strategy. The production Vercel response headers, including CSP and HSTS, are in `vercel.json`. Confirm the live project settings and headers during rollout—this repository cannot verify or change Vercel authentication scope or Firewall configuration.
 
+The reviewed Vercel target was `guardian-gemini-3-flash-preview` with Vite, Node.js 24.x, and observed Deployment Protection scope `all_except_custom_domains`. Re-verify those settings before rollout; this observed scope is not treated as API authentication.
+
 This repository does not implement a GitHub App, webhook receiver, or GitHub API integration. Do not grant GitHub App permissions or configure webhook secrets for this application unless such an integration is added and reviewed later.
 
 ## Rollout and recovery
