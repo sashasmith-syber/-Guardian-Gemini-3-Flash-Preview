@@ -57,4 +57,23 @@ describe('client boundary', () => {
       assert.equal(file.includes('@google/genai'), false);
     }
   });
+
+  it('keeps Vite network and filesystem defaults and separates production headers', () => {
+    const vite = source('vite.config.ts');
+    assert.match(vite, /process\.env\.HOST \|\| localEnv\.HOST \|\| '127\.0\.0\.1'/);
+    assert.equal(vite.includes('allowedHosts:'), false);
+    assert.equal(vite.includes('cors:'), false);
+    assert.equal(vite.includes('fs:'), false);
+    assert.match(vite, /server:\s*\{[\s\S]*?host,[\s\S]*?\n\s*\},\s*preview:/);
+    assert.match(vite, /preview:\s*\{[\s\S]*?host,/);
+
+    const productionHeaders = JSON.parse(source('vercel.json')) as {
+      headers: Array<{ source: string; headers: Array<{ key: string; value: string }> }>;
+    };
+    const headers = new Map(productionHeaders.headers[0].headers.map(({ key, value }) => [key, value]));
+    assert.equal(headers.get('Strict-Transport-Security'), 'max-age=31536000');
+    assert.equal(headers.get('X-Content-Type-Options'), 'nosniff');
+    assert.match(headers.get('Content-Security-Policy') ?? '', /frame-ancestors 'none'/);
+    assert.equal(headers.get('X-Frame-Options'), 'DENY');
+  });
 });

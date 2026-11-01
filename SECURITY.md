@@ -27,6 +27,8 @@ The sliding-window rate gate is process-local, with bounded client state. Vercel
 
 The reviewed Vercel target was `guardian-gemini-3-flash-preview` with Vite, Node.js 24.x, and observed Deployment Protection scope `all_except_custom_domains`. Re-verify those settings before rollout; this observed scope is not treated as API authentication.
 
+Vite 6.4.4 was affected by [GHSA-8g5g-mxqh-grgj / CVE-2026-118662](https://github.com/advisories/GHSA-8g5g-mxqh-grgj), fixed in 6.4.5. The advisory concerns query-based bypass of `server.fs.deny` on a network-exposed development server; it does not affect the static Vercel production bundle. The project keeps the dev server loopback-bound by default and does not override Vite's host validation, CORS, or filesystem defaults. Do not expose a dev/preview server to untrusted networks.
+
 This repository does not implement a GitHub App, webhook receiver, or GitHub API integration. Do not grant GitHub App permissions or configure webhook secrets for this application unless such an integration is added and reviewed later.
 
 ## Rollout and recovery

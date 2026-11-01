@@ -20,7 +20,11 @@ View your app in AI Studio: https://ai.studio/apps/drive/1hUe9O99hpOmvLO296utTmM
 4. Run the app:
    `npm run dev`
 
-The dev server listens on `127.0.0.1:3000`. Chat, transcription, and speech go through the local safe bubble after operator sign-in. The session cookie is HttpOnly, SameSite=Strict, and expires after eight hours; on local HTTP it is not marked Secure. Datadog keys stay in the `DD_API_KEY` and `DD_APP_KEY` GitHub Actions secrets.
+The dev server listens on `127.0.0.1:3000`. `HOST` can override the bind address for trusted local-network testing; setting it to `0.0.0.0` exposes the development/preview server on every interface. Do not expose it to untrusted networks. Vite's `allowedHosts`, CORS, and filesystem options are left at their defaults: no wildcard host allowance or CORS override is configured, and the default filesystem deny list protects `.env`, `.env.*`, certificate files, and `.git`. The custom API middleware has its own operator-session checks; Vite's host and CORS protections are not API authorization.
+
+Vite's `server` and `preview` headers apply only to those local commands. Production Vercel response headers are configured separately in `vercel.json`; a local `vite preview` response does not prove that the deployed Vercel headers or project settings are active.
+
+Chat, transcription, and speech go through the local safe bubble after operator sign-in. The session cookie is HttpOnly, SameSite=Strict, and expires after eight hours; on local HTTP it is not marked Secure. Datadog keys stay in the `DD_API_KEY` and `DD_APP_KEY` GitHub Actions secrets.
 
 ## Deploy on Vercel
 
