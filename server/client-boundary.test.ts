@@ -32,8 +32,10 @@ describe('client boundary', () => {
     for (const file of browserSources) {
       assert.equal(file.includes('process.env.API_KEY'), false);
       assert.equal(file.includes('process.env.GEMINI_API_KEY'), false);
+      assert.equal(file.includes('process.env.GUARDIAN_OPERATOR_PASSWORD'), false);
       assert.equal(file.includes('@google/genai'), false);
       assert.equal(file.includes('VITE_GEMINI_API_KEY'), false);
+      assert.equal(file.includes('GUARDIAN_OPERATOR_PASSWORD'), false);
     }
     assert.equal(html.includes('@google/genai'), false);
     assert.equal(html.includes('cdn.tailwindcss.com'), false);
@@ -48,7 +50,7 @@ describe('client boundary', () => {
     assert.equal(terminal.includes('prepareImageFile'), true);
     assert.equal(terminal.includes("'/api/transcribe'"), true);
     assert.equal(terminal.includes("'/api/tts'"), true);
-    for (const route of ['api/health.ts', 'api/generate.ts', 'api/transcribe.ts', 'api/tts.ts']) {
+    for (const route of ['api/health.ts', 'api/generate.ts', 'api/transcribe.ts', 'api/tts.ts', 'api/session.ts']) {
       const file = source(route);
       assert.equal(file.includes('handleBubbleRequest'), true);
       assert.equal(file.includes('GEMINI_API_KEY'), false);

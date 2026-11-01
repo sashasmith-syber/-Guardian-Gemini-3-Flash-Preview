@@ -4,9 +4,11 @@ import { SYSTEM_INSTRUCTION } from './persona.ts';
 
 const TEXT_MODEL = 'gemini-3-flash-preview';
 const TTS_MODEL = 'gemini-2.5-flash-preview-tts';
+const PROVIDER_TIMEOUT_MS = 40_000;
+const MAX_OUTPUT_TOKENS = 1024;
 
 export async function invokeGemini(apiKey: string, op: BubbleOp): Promise<BubbleResult> {
-  const ai = new GoogleGenAI({ apiKey });
+  const ai = new GoogleGenAI({ apiKey, httpOptions: { timeout: PROVIDER_TIMEOUT_MS } });
 
   if (op.kind === 'tts') {
     const response = await ai.models.generateContent({
@@ -14,6 +16,7 @@ export async function invokeGemini(apiKey: string, op: BubbleOp): Promise<Bubble
       contents: [{ parts: [{ text: `Say with strategic authority: ${op.text.slice(0, 500)}` }] }],
       config: {
         responseModalities: [Modality.AUDIO],
+        maxOutputTokens: 512,
         speechConfig: {
           voiceConfig: {
             prebuiltVoiceConfig: { voiceName: 'Kore' },
@@ -39,6 +42,7 @@ export async function invokeGemini(apiKey: string, op: BubbleOp): Promise<Bubble
           ],
         },
       ],
+      config: { maxOutputTokens: MAX_OUTPUT_TOKENS },
     });
     return { text: response.text ?? '' };
   }
@@ -55,6 +59,7 @@ export async function invokeGemini(apiKey: string, op: BubbleOp): Promise<Bubble
     config: {
       systemInstruction: SYSTEM_INSTRUCTION,
       temperature: 0.2,
+      maxOutputTokens: MAX_OUTPUT_TOKENS,
     },
   });
   return { text: response.text ?? '' };

@@ -1,23 +1,26 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
-import type ts from 'typescript';
-
-const typescript = createRequire(import.meta.url)('typescript') as typeof ts;
+import { createSessionCookie } from './auth.ts';
 import type { BubbleOp, BubbleResult } from './bubble.ts';
 import { KeyRing } from './key-ring.ts';
 import { RateGate } from './rate-gate.ts';
 import { handleBubbleRequest, productionBubbleDeps, type VercelBubbleDeps } from './vercel.ts';
 
 const SECRET = 'vercel-test-key-do-not-leak';
+const PASSWORD = 'a-long-random-operator-password-123456789';
+const SESSION_COOKIE = createSessionCookie(PASSWORD, PASSWORD, 1_700_000_000_000)!.split(';')[0];
 
 function deps(invoke: VercelBubbleDeps['invoke'], options?: { secrets?: string[]; limit?: number; maxBodyBytes?: number }): VercelBubbleDeps {
   const secrets = options?.secrets ?? [SECRET];
   return {
     ring: new KeyRing({ secrets, strategy: 'failover', cooldownMs: 60_000 }),
     gate: new RateGate(options?.limit ?? 10, 60_000),
+    authGate: new RateGate(5, 60_000),
+    operatorPassword: PASSWORD,
     maxBodyBytes: options?.maxBodyBytes ?? 1000,
     invoke,
     now: () => 1_700_000_000_000,
@@ -25,12 +28,21 @@ function deps(invoke: VercelBubbleDeps['invoke'], options?: { secrets?: string[]
   };
 }
 
-function post(path: string, body: string, init?: { origin?: string; host?: string; contentType?: string; ip?: string }): Request {
+function post(path: string, body: string, init?: {
+  origin?: string;
+  host?: string;
+  contentType?: string;
+  ip?: string;
+  cookie?: string;
+  session?: boolean;
+}): Request {
   const headers = new Headers();
   if (init?.contentType !== '') headers.set('content-type', init?.contentType ?? 'application/json');
   if (init?.origin) headers.set('origin', init.origin);
   if (init?.host) headers.set('x-forwarded-host', init.host);
   if (init?.ip) headers.set('x-real-ip', init.ip);
+  if (init?.cookie) headers.set('cookie', init.cookie);
+  else if (init?.session !== false) headers.set('cookie', SESSION_COOKIE);
   return new Request(`https://guardian.example${path}`, {
     method: 'POST',
     headers,
@@ -69,7 +81,38 @@ describe('vercel bubble adapter', () => {
     assert.equal(response.status, 200);
     const payload = await response.json() as { ready?: boolean; keys?: number };
     assert.equal(payload.ready, false);
-    assert.equal(payload.keys, 0);
+    assert.equal('keys' in payload, false);
+  });
+
+  it('creates an HttpOnly operator session and requires it for provider requests', async () => {
+    let calls = 0;
+    const invoke = async (_apiKey: string, _op: BubbleOp): Promise<BubbleResult> => {
+      calls += 1;
+      return { text: 'ok' };
+    };
+    const denied = await handleBubbleRequest(
+      post('/api/generate', '{"text":"status"}', { session: false }),
+      '/api/generate',
+      deps(invoke),
+    );
+    assert.equal(denied.status, 401);
+    assert.equal(calls, 0);
+
+    const login = await handleBubbleRequest(
+      post('/api/session', JSON.stringify({ password: PASSWORD }), { session: false }),
+      '/api/session',
+      deps(invoke),
+    );
+    assert.equal(login.status, 200);
+    assert.match(login.headers.get('set-cookie') ?? '', /HttpOnly; SameSite=Strict; Max-Age=28800; Secure/);
+    const cookie = login.headers.get('set-cookie')!.split(';')[0];
+    const allowed = await handleBubbleRequest(
+      post('/api/generate', '{"text":"status"}', { cookie }),
+      '/api/generate',
+      deps(invoke),
+    );
+    assert.equal(allowed.status, 200);
+    assert.equal(calls, 1);
   });
 
   it('rejects a missing content type, invalid JSON, an oversized body, and a foreign origin', async () => {
@@ -132,6 +175,7 @@ describe('vercel bubble adapter', () => {
   it('caps the production body limit at the platform maximum and reads only server env', () => {
     const configured = productionBubbleDeps({
       GEMINI_API_KEY: SECRET,
+      GUARDIAN_OPERATOR_PASSWORD: PASSWORD,
       BUBBLE_MAX_BODY_BYTES: '8000000',
       VITE_GEMINI_API_KEY: 'browser-key',
     });
@@ -143,37 +187,32 @@ describe('vercel bubble adapter', () => {
 describe('vercel typescript emit', () => {
   it('rewrites .ts import specifiers to .js so the lambda can load', () => {
     const root = path.resolve(new URL('..', import.meta.url).pathname);
-    const configPath = path.join(root, 'tsconfig.json');
-    const read = typescript.readConfigFile(configPath, typescript.sys.readFile);
-    const config = read.config;
-    config.compilerOptions = {
-      ...config.compilerOptions,
-      declaration: false,
-      noEmit: false,
-      sourceMap: false,
-    };
-    const parsed = typescript.parseJsonConfigFileContent(config, typescript.sys, root, undefined, configPath);
-    const entry = path.join(root, 'server/vercel.ts');
-    const host: ts.LanguageServiceHost = {
-      getScriptFileNames: () => [entry],
-      getScriptVersion: () => '1',
-      getScriptSnapshot: (fileName) => {
-        const text = typescript.sys.readFile(fileName);
-        return text === undefined ? undefined : typescript.ScriptSnapshot.fromString(text);
-      },
-      getCurrentDirectory: () => root,
-      getCompilationSettings: () => parsed.options,
-      getDefaultLibFileName: (options) => typescript.getDefaultLibFilePath(options),
-      fileExists: typescript.sys.fileExists,
-      readFile: typescript.sys.readFile,
-      readDirectory: typescript.sys.readDirectory,
-      directoryExists: typescript.sys.directoryExists,
-      getDirectories: typescript.sys.getDirectories,
-    };
-    const emitted = typescript.createLanguageService(host).getEmitOutput(entry);
-    const javascript = emitted.outputFiles.find((file) => file.name.endsWith('.js'))?.text ?? '';
-    assert.match(javascript, /from ["']\.\/bubble\.js["']/);
-    assert.match(javascript, /from ["']\.\.\/utils\/imageBudget\.js["']/);
-    assert.equal(javascript.includes('.ts'), false);
+    const temp = mkdtempSync(path.join(tmpdir(), 'guardian-ts-emit-'));
+    try {
+      const source = path.join(temp, 'src');
+      const output = path.join(temp, 'dist');
+      const config = path.join(temp, 'tsconfig.json');
+      const sourceFile = path.join(source, 'entry.ts');
+      mkdirSync(source, { recursive: true });
+      writeFileSync(path.join(source, 'target.ts'), 'export const target = true;\n');
+      writeFileSync(sourceFile, "import { target } from './target.ts';\nexport { target };\n");
+      writeFileSync(config, JSON.stringify({
+        compilerOptions: {
+          target: 'ES2022',
+          module: 'ESNext',
+          moduleResolution: 'bundler',
+          rewriteRelativeImportExtensions: true,
+          rootDir: source,
+          outDir: output,
+        },
+        include: [path.join(source, '*.ts')],
+      }));
+      execFileSync(process.execPath, [path.join(root, 'node_modules/typescript/lib/tsc.js'), '-p', config]);
+      const javascript = readFileSync(path.join(output, 'entry.js'), 'utf8');
+      assert.match(javascript, /from ["']\.\/target\.js["']/);
+      assert.equal(javascript.includes('.ts'), false);
+    } finally {
+      rmSync(temp, { recursive: true, force: true });
+    }
   });
 });

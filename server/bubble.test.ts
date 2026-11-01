@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { describe, it } from 'node:test';
+import { createSessionCookie } from './auth.ts';
 import { dispatchBubble, type BubbleOp, type BubbleResult } from './bubble.ts';
 import { createBubbleMiddleware } from './http.ts';
 import { KeyRing } from './key-ring.ts';
@@ -9,7 +10,9 @@ import { RateGate } from './rate-gate.ts';
 
 const SECRET_A = 'alpha-key-do-not-leak';
 const SECRET_B = 'beta-key-do-not-leak';
+const PASSWORD = 'a-long-random-operator-password-123456789';
 const now = () => 1_700_000_000_000;
+const sessionCookie = createSessionCookie(PASSWORD, PASSWORD, now(), false)!.split(';')[0];
 
 function ring(strategy: 'failover' | 'round-robin' = 'failover', secrets = [SECRET_A, SECRET_B]) {
   return new KeyRing({ secrets, strategy, cooldownMs: 60_000 });
@@ -28,12 +31,15 @@ async function post(path: string, body: unknown, invoke: (apiKey: string, op: Bu
       path,
       origin: options?.origin,
       host: options?.host ?? '127.0.0.1:3000',
+      cookie: sessionCookie,
       ip: options?.ip ?? '127.0.0.1',
       body,
     },
     {
       ring: ring('failover', options?.secrets ?? [SECRET_A, SECRET_B]),
       gate: new RateGate(options?.limit ?? 10, 60_000),
+      authGate: new RateGate(5, 60_000),
+      operatorPassword: PASSWORD,
       invoke,
       now,
       log: () => {},
@@ -77,6 +83,23 @@ describe('safe bubble', () => {
     assert.equal(response.body.error, 'API interface is not configured.');
   });
 
+  it('requires an authenticated operator session before provider use', async () => {
+    let calls = 0;
+    const response = await dispatchBubble(
+      { method: 'POST', path: '/api/generate', host: '127.0.0.1:3000', ip: '127.0.0.1', body: { text: 'status' } },
+      {
+        ring: ring(),
+        gate: new RateGate(10, 60_000),
+        authGate: new RateGate(5, 60_000),
+        operatorPassword: PASSWORD,
+        invoke: async () => { calls += 1; return { text: 'nope' }; },
+        now,
+      },
+    );
+    assert.equal(response.status, 401);
+    assert.equal(calls, 0);
+  });
+
   it('refuses a foreign origin and limits repeated calls', async () => {
     const forbidden = await post(
       '/api/generate',
@@ -90,27 +113,36 @@ describe('safe bubble', () => {
     const deps = {
       ring: ring(),
       gate,
+      operatorPassword: PASSWORD,
       invoke: async () => ({ audioBase64: 'AAAA' as const }),
       now,
     };
     const first = await dispatchBubble(
-      { method: 'POST', path: '/api/tts', host: '127.0.0.1:3000', ip: '10.0.0.8', body: { text: 'speak' } },
+      { method: 'POST', path: '/api/tts', host: '127.0.0.1:3000', ip: '10.0.0.8', cookie: sessionCookie, body: { text: 'speak' } },
       deps,
     );
     const second = await dispatchBubble(
-      { method: 'POST', path: '/api/tts', host: '127.0.0.1:3000', ip: '10.0.0.8', body: { text: 'speak again' } },
+      { method: 'POST', path: '/api/tts', host: '127.0.0.1:3000', ip: '10.0.0.8', cookie: sessionCookie, body: { text: 'speak again' } },
       deps,
     );
     assert.equal(first.status, 200);
     assert.equal(second.status, 429);
   });
 
-  it('rejects disallowed media and publishes health without secrets', async () => {
+  it('rejects invalid media and schemas and publishes minimal health', async () => {
     const image = await post('/api/generate', {
       text: 'look',
       image: { mimeType: 'image/svg+xml', data: 'AAAA' },
     }, async () => ({ text: 'nope' }));
     assert.equal(image.status, 400);
+    const extraFields = await post('/api/generate', { text: 'look', operator: 'unexpected' }, async () => ({ text: 'nope' }));
+    assert.equal(extraFields.status, 400);
+    const oversizedMedia = await post(
+      '/api/transcribe',
+      { mimeType: 'audio/webm', audioBase64: 'A'.repeat(4_000_004) },
+      async () => ({ text: 'nope' }),
+    );
+    assert.equal(oversizedMedia.status, 400);
 
     const health = await dispatchBubble(
       { method: 'GET', path: '/api/health', host: '127.0.0.1:3000', ip: '127.0.0.1' },
@@ -119,7 +151,7 @@ describe('safe bubble', () => {
     assert.equal(health.status, 200);
     assert.equal(health.body.ok, true);
     assert.equal(health.body.bubble, 'closed');
-    assert.equal(health.body.keys, 2);
+    assert.equal('keys' in health.body, false);
     assert.equal(JSON.stringify(health.body).includes(SECRET_A), false);
   });
 });
@@ -129,6 +161,7 @@ describe('bubble http boundary', () => {
     const middleware = createBubbleMiddleware({
       ring: ring('failover', []),
       gate: new RateGate(10, 60_000),
+      operatorPassword: PASSWORD,
       maxBodyBytes: 32,
       invoke: async () => ({ text: 'unused' }),
       now,
@@ -153,6 +186,7 @@ describe('bubble http boundary', () => {
       assert.equal(health.headers.get('content-type'), 'application/json; charset=utf-8');
       assert.equal(healthBody.ok, true);
       assert.equal(healthBody.ready, false);
+      assert.equal(health.headers.get('content-security-policy'), "default-src 'none'; frame-ancestors 'none'; base-uri 'none'");
       const oversized = await fetch(`${base}/api/generate`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', host: `127.0.0.1:${port}` },
