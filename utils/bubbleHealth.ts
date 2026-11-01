@@ -1,9 +1,6 @@
 export type BubbleHealth = {
   ok: boolean;
   ready: boolean;
-  keys: number;
-  cooling: number;
-  strategy?: string;
   bubble?: string;
 };
 
@@ -18,9 +15,6 @@ export async function fetchBubbleHealth(): Promise<BubbleHealth | null> {
     return {
       ok: body.ok === true,
       ready: body.ready === true,
-      keys: typeof body.keys === 'number' ? body.keys : 0,
-      cooling: typeof body.cooling === 'number' ? body.cooling : 0,
-      strategy: typeof body.strategy === 'string' ? body.strategy : undefined,
       bubble: typeof body.bubble === 'string' ? body.bubble : undefined,
     };
   } catch {
@@ -37,7 +31,7 @@ OPERATOR: Gemini keys are in cooldown after auth or rate-limit pressure. No synt
 
 **Next steps**
 1. Wait for the cooldown window (default 60s), then resend.
-2. Confirm \`GET /api/health\` shows \`ready: true\` and \`cooling: 0\`.
+2. Confirm \`GET /api/health\` shows \`ready: true\`.
 3. If cooling persists, rotate or add keys in \`.env\` (\`GEMINI_API_KEY\` / \`GEMINI_API_KEYS\`) and restart the server.
 
 ---
@@ -67,7 +61,7 @@ OPERATOR: \`GEMINI_API_KEY\` is not configured on the server. The console will *
 2. Paste a Gemini key into \`GEMINI_API_KEY\`. Never use a \`VITE_\` prefix — that leaks into the browser bundle.
 3. Optional failover: \`GEMINI_API_KEYS\` (comma-separated). Strategy: \`GEMINI_KEY_STRATEGY=failover\` or \`round-robin\`.
 4. Restart \`npm run dev\` (or redeploy Vercel so Functions read the new env).
-5. Verify \`GET /api/health\` returns \`ready: true\` and \`keys\` ≥ 1.
+5. Verify \`GET /api/health\` returns \`ready: true\`.
 6. Resend your directive — Guardian replies only through the live bubble.
 
 **Stripe (you manage the account)**  

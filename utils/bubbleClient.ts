@@ -14,6 +14,7 @@ export async function bubblePost<T>(path: string, body: unknown): Promise<T> {
     response = await fetch(path, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
+      credentials: 'same-origin',
       body: JSON.stringify(body),
     });
   } catch {
@@ -28,7 +29,10 @@ export async function bubblePost<T>(path: string, body: unknown): Promise<T> {
       payload = {};
     }
   }
-  if (!response.ok) throw new Error(rejectionMessage(response.status, raw, payload.error));
+  if (!response.ok) {
+    if (response.status === 401) window.dispatchEvent(new Event('guardian-session-expired'));
+    throw new Error(rejectionMessage(response.status, raw, payload.error));
+  }
   return payload as T;
 }
 

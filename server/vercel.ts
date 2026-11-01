@@ -19,6 +19,8 @@ export function productionBubbleDeps(env: Record<string, string | undefined>): V
   return {
     ring,
     gate: new RateGate(settings.rateLimit, settings.rateWindowMs),
+    authGate: new RateGate(settings.authRateLimit, settings.rateWindowMs),
+    operatorPassword: settings.operatorPassword,
     maxBodyBytes: Math.min(settings.maxBodyBytes, PLATFORM_BODY_LIMIT),
     invoke: invokeGemini,
     log: (line) => {
@@ -67,8 +69,42 @@ function jsonResponse(response: BubbleResponse): Response {
       'referrer-policy': 'no-referrer',
       'x-frame-options': 'DENY',
       'permissions-policy': 'camera=(), microphone=(self), geolocation=()',
+      'content-security-policy': "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+      'cross-origin-opener-policy': 'same-origin',
+      'cross-origin-resource-policy': 'same-origin',
     },
   });
+}
+
+async function readLimitedBody(request: Request, limit: number): Promise<string> {
+  const contentLength = request.headers.get('content-length');
+  if (contentLength !== null) {
+    if (!/^\d+$/.test(contentLength)) {
+      throw Object.assign(new Error('Invalid Content-Length.'), { statusCode: 400 });
+    }
+    if (Number(contentLength) > limit) {
+      throw Object.assign(new Error('Request body is too large.'), { statusCode: 413 });
+    }
+  }
+  if (!request.body) return '';
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > limit) {
+        void reader.cancel().catch(() => {});
+        throw Object.assign(new Error('Request body is too large.'), { statusCode: 413 });
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))).toString('utf8');
 }
 
 export async function handleBubbleRequest(
@@ -82,14 +118,24 @@ export async function handleBubbleRequest(
     if (!isJsonContentType(contentType)) {
       return jsonResponse({ status: 415, body: { error: 'Content-Type must be application/json.' } });
     }
-    let raw = '';
+    let raw: string;
     try {
-      raw = await request.text();
-    } catch {
-      return jsonResponse({ status: 400, body: { error: 'Request body must be JSON.' } });
-    }
-    if (Buffer.byteLength(raw) > deps.maxBodyBytes) {
-      return jsonResponse({ status: 413, body: { error: ATTACHMENT_TOO_LARGE } });
+      const maxBodyBytes = path === '/api/session' ? Math.min(deps.maxBodyBytes, 4096) : deps.maxBodyBytes;
+      raw = await readLimitedBody(request, maxBodyBytes);
+    } catch (error) {
+      const status = typeof error === 'object' && error && 'statusCode' in error
+        ? Number((error as { statusCode: unknown }).statusCode)
+        : 400;
+      return jsonResponse({
+        status: status === 413 ? 413 : 400,
+        body: {
+          error: status !== 413
+            ? 'Request body must be JSON.'
+            : path === '/api/session'
+              ? 'Request body is too large.'
+              : ATTACHMENT_TOO_LARGE,
+        },
+      });
     }
     try {
       body = raw.length === 0 ? {} : JSON.parse(raw) as unknown;
@@ -105,12 +151,18 @@ export async function handleBubbleRequest(
         path,
         origin: request.headers.get('origin') ?? undefined,
         host: requestHost(request),
+        cookie: request.headers.get('cookie') ?? undefined,
+        secure: new URL(request.url).protocol === 'https:',
         ip: requestIp(request),
         body,
       },
       deps,
     );
-    return jsonResponse(response);
+    const result = jsonResponse(response);
+    for (const [name, value] of Object.entries(response.headers ?? {})) {
+      result.headers.set(name, value);
+    }
+    return result;
   } catch {
     return jsonResponse({ status: 500, body: { error: 'API interface destabilized. Check network link.' } });
   }

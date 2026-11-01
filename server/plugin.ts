@@ -18,6 +18,8 @@ export function guardianBubblePlugin(root = process.cwd()): Plugin {
   const middleware = createBubbleMiddleware({
     ring,
     gate,
+    authGate: new RateGate(settings.authRateLimit, settings.rateWindowMs),
+    operatorPassword: settings.operatorPassword,
     maxBodyBytes: settings.maxBodyBytes,
     invoke: invokeGemini,
     log: (line) => {

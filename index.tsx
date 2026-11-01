@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, type FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 import { SpeedInsights } from '@vercel/speed-insights/react';
 import { 
@@ -32,6 +32,11 @@ import { GuardianTerminal } from './components/GuardianTerminal';
 import { NodeInspectorModal } from './components/NodeInspectorModal';
 
 export const GuardianConsole: React.FC = () => {
+  const [operatorAuthenticated, setOperatorAuthenticated] = useState(false);
+  const [operatorSessionLoading, setOperatorSessionLoading] = useState(true);
+  const [operatorPassword, setOperatorPassword] = useState('');
+  const [operatorSessionError, setOperatorSessionError] = useState('');
+  const [operatorLoginPending, setOperatorLoginPending] = useState(false);
   const [activeView, setActiveView] = useState<'dashboard' | 'telemetry' | 'status' | 'alerts' | 'guardian'>('dashboard');
   const [metrics, setMetrics] = useState<VitalMetrics>(INITIAL_VITAL_METRICS);
   const [nodes, setNodes] = useState<TelemetryNode[]>(INITIAL_NODES);
@@ -46,6 +51,27 @@ export const GuardianConsole: React.FC = () => {
   const [pendingDirective, setPendingDirective] = useState<string | null>(null);
   const [bubbleHealth, setBubbleHealth] = useState<BubbleHealth | null>(null);
   const [bubbleHealthKnown, setBubbleHealthKnown] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch('/api/session', { cache: 'no-store', credentials: 'same-origin' })
+      .then((response) => response.json() as Promise<{ authenticated?: boolean }>)
+      .then((session) => {
+        if (!cancelled) setOperatorAuthenticated(session.authenticated === true);
+      })
+      .catch(() => {
+        if (!cancelled) setOperatorAuthenticated(false);
+      })
+      .finally(() => {
+        if (!cancelled) setOperatorSessionLoading(false);
+      });
+    const expireSession = () => setOperatorAuthenticated(false);
+    window.addEventListener('guardian-session-expired', expireSession);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('guardian-session-expired', expireSession);
+    };
+  }, []);
 
   // Stream history for charts (last 20 points)
   const [streamHistory, setStreamHistory] = useState<{ ingress: number; egress: number; time: string }[]>(() => {
@@ -244,6 +270,44 @@ export const GuardianConsole: React.FC = () => {
     setSelectedNode(updatedNode);
   };
 
+  const handleOperatorLogin = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setOperatorLoginPending(true);
+    setOperatorSessionError('');
+    try {
+      const response = await fetch('/api/session', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ password: operatorPassword }),
+      });
+      const result = await response.json() as { authenticated?: boolean; error?: string };
+      if (!response.ok || result.authenticated !== true) {
+        setOperatorSessionError(result.error || 'Unable to authenticate operator.');
+        return;
+      }
+      setOperatorAuthenticated(true);
+      setOperatorPassword('');
+    } catch {
+      setOperatorSessionError('Operator sign-in is unavailable. Check the network and try again.');
+    } finally {
+      setOperatorLoginPending(false);
+    }
+  };
+
+  const handleOperatorLogout = async () => {
+    try {
+      await fetch('/api/session', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ logout: true }),
+      });
+    } finally {
+      setOperatorAuthenticated(false);
+    }
+  };
+
   // Send message to Guardian Strategist AI — live bubble only (no Potemkin enclave briefs)
   const handleSendMessage = async (text: string, imageData?: string) => {
     const userMessage: ChatMessage = {
@@ -357,6 +421,39 @@ OPERATOR: The safe bubble rejected this turn (\`${message || 'Socket timeout'}\`
     link.click();
     document.body.removeChild(link);
   };
+
+  if (operatorSessionLoading) {
+    return <main className="min-h-screen bg-[#07090e] text-[#00f2ff] font-mono grid place-items-center">CHECKING OPERATOR SESSION…</main>;
+  }
+
+  if (!operatorAuthenticated) {
+    return (
+      <main className="min-h-screen bg-[#07090e] text-[#00f2ff] font-mono grid place-items-center p-4">
+        <form onSubmit={handleOperatorLogin} className="w-full max-w-md border border-[#00f2ff]/30 bg-black/60 p-6 space-y-4">
+          <h1 className="text-lg tracking-widest">GUARDIAN OPERATOR SIGN-IN</h1>
+          <p className="text-xs text-[#00f2ff]/70">Enter the operator password configured on the server. It is not stored in this browser.</p>
+          <label className="block text-xs" htmlFor="operator-password">Operator password</label>
+          <input
+            id="operator-password"
+            autoComplete="current-password"
+            type="password"
+            required
+            value={operatorPassword}
+            onChange={(event) => setOperatorPassword(event.target.value)}
+            className="w-full border border-[#00f2ff]/40 bg-black px-3 py-2 text-sm text-white"
+          />
+          {operatorSessionError && <p role="alert" className="text-sm text-red-400">{operatorSessionError}</p>}
+          <button
+            type="submit"
+            disabled={operatorLoginPending}
+            className="w-full border border-[#00f2ff] px-3 py-2 text-xs tracking-widest disabled:opacity-50"
+          >
+            {operatorLoginPending ? 'VERIFYING…' : 'AUTHENTICATE'}
+          </button>
+        </form>
+      </main>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#07090e] text-[#00f2ff] font-mono flex flex-col selection:bg-[#00f2ff] selection:text-black">
@@ -498,11 +595,12 @@ OPERATOR: The safe bubble rejected this turn (\`${message || 'Socket timeout'}\`
             {!bubbleHealthKnown
               ? 'HEALTH: CHECKING'
               : bubbleHealth?.ready
-                ? `READY · ${bubbleHealth.keys} KEY(S)`
+                ? 'READY'
                 : bubbleHealth
-                  ? `OFFLINE · ${bubbleHealth.keys} KEY(S) · COOLING ${bubbleHealth.cooling}`
+                  ? 'OFFLINE'
                   : 'HEALTH: UNREACHABLE'}
           </span>
+          <button type="button" onClick={handleOperatorLogout} className="hover:text-white">SIGN OUT</button>
         </div>
         <div className="flex items-center gap-3 font-mono">
           <span>SENSORS: OPTICAL · ACOUSTIC · VOCAL</span>

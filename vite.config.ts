@@ -49,7 +49,7 @@ export default defineConfig({
       'Content-Security-Policy': [
         ...sharedPolicy,
         "script-src 'self'",
-        "connect-src 'self'",
+        "connect-src 'self' https://vitals.vercel-insights.com",
       ].join('; '),
     },
   },

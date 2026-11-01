@@ -1,11 +1,13 @@
 import type { KeyRing } from './key-ring.ts';
 import type { RateGate } from './rate-gate.ts';
+import { clearSessionCookie, createSessionCookie, hasValidSession, isOperatorPasswordConfigured } from './auth.ts';
 import { redact } from './redact.ts';
 
 const ROTATE_STATUSES = new Set([401, 403, 429]);
 const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 const AUDIO_TYPES = new Set(['audio/webm', 'audio/wav', 'audio/mpeg', 'audio/mp4', 'audio/ogg']);
 const MAX_TEXT = 16_000;
+const MAX_MEDIA_BASE64 = 4_000_000;
 
 export type BubbleOp =
   | { kind: 'generate'; text: string; image?: { mimeType: string; data: string } }
@@ -19,6 +21,8 @@ export type BubbleRequest = {
   path: string;
   origin?: string;
   host?: string;
+  cookie?: string;
+  secure?: boolean;
   ip: string;
   body?: unknown;
 };
@@ -26,11 +30,14 @@ export type BubbleRequest = {
 export type BubbleResponse = {
   status: number;
   body: Record<string, unknown>;
+  headers?: Record<string, string>;
 };
 
 export type BubbleDeps = {
   ring: KeyRing;
   gate: RateGate;
+  authGate?: RateGate;
+  operatorPassword?: string;
   invoke: (apiKey: string, op: BubbleOp) => Promise<BubbleResult>;
   now?: () => number;
   log?: (line: string) => void;
@@ -40,7 +47,7 @@ export function sameOrigin(origin: string | undefined, host: string | undefined)
   if (!origin) return true;
   if (!host) return false;
   try {
-    return new URL(origin).host === host;
+    return new URL(origin).host.toLowerCase() === host.toLowerCase();
   } catch {
     return false;
   }
@@ -62,8 +69,12 @@ function shouldRotate(err: unknown): boolean {
 }
 
 function isBase64(value: string): boolean {
-  if (value.length === 0 || value.length % 4 !== 0) return false;
+  if (value.length === 0 || value.length > MAX_MEDIA_BASE64 || value.length % 4 !== 0) return false;
   return /^[A-Za-z0-9+/]+={0,2}$/.test(value);
+}
+
+function hasOnlyKeys(record: Record<string, unknown>, allowed: string[]): boolean {
+  return Object.keys(record).every((key) => allowed.includes(key));
 }
 
 function parseOp(path: string, body: unknown): { ok: true; op: BubbleOp } | { ok: false; error: string } {
@@ -73,6 +84,10 @@ function parseOp(path: string, body: unknown): { ok: true; op: BubbleOp } | { ok
   const record = body as Record<string, unknown>;
 
   if (path === '/api/generate') {
+    if (!hasOnlyKeys(record, ['text', 'image'])) return { ok: false, error: 'Request body is not valid.' };
+    if (record.text !== undefined && typeof record.text !== 'string') {
+      return { ok: false, error: 'Request body is not valid.' };
+    }
     const text = typeof record.text === 'string' ? record.text : '';
     if (text.length > MAX_TEXT) return { ok: false, error: 'Text is too long.' };
     let image: { mimeType: string; data: string } | undefined;
@@ -81,6 +96,9 @@ function parseOp(path: string, body: unknown): { ok: true; op: BubbleOp } | { ok
         return { ok: false, error: 'Request body is not valid.' };
       }
       const imageRecord = record.image as Record<string, unknown>;
+      if (!hasOnlyKeys(imageRecord, ['mimeType', 'data'])) {
+        return { ok: false, error: 'Request body is not valid.' };
+      }
       const mimeType = imageRecord.mimeType;
       const data = imageRecord.data;
       if (typeof mimeType !== 'string' || !IMAGE_TYPES.has(mimeType)) {
@@ -96,6 +114,9 @@ function parseOp(path: string, body: unknown): { ok: true; op: BubbleOp } | { ok
   }
 
   if (path === '/api/transcribe') {
+    if (!hasOnlyKeys(record, ['mimeType', 'audioBase64'])) {
+      return { ok: false, error: 'Request body is not valid.' };
+    }
     const mimeType = record.mimeType;
     const audioBase64 = record.audioBase64;
     if (typeof mimeType !== 'string' || !AUDIO_TYPES.has(mimeType)) {
@@ -108,6 +129,7 @@ function parseOp(path: string, body: unknown): { ok: true; op: BubbleOp } | { ok
   }
 
   if (path === '/api/tts') {
+    if (!hasOnlyKeys(record, ['text'])) return { ok: false, error: 'Request body is not valid.' };
     if (typeof record.text !== 'string' || !record.text.trim()) {
       return { ok: false, error: 'Text is required.' };
     }
@@ -162,18 +184,51 @@ export async function dispatchBubble(request: BubbleRequest, deps: BubbleDeps): 
   }
 
   const method = request.method.toUpperCase();
-  if (method === 'GET' && request.path === '/api/health') {
-    const cooling = deps.ring.coolingCount(now());
+  if (request.path === '/api/health') {
+    if (method !== 'GET') return { status: 405, body: { error: 'Method not allowed.' } };
     return {
       status: 200,
       body: {
         ok: true,
         bubble: 'closed',
-        ready: deps.ring.size > 0 && cooling < deps.ring.size,
-        strategy: deps.ring.strategy,
-        keys: deps.ring.size,
-        cooling,
+        ready: deps.ring.size > 0 && deps.ring.coolingCount(now()) < deps.ring.size,
       },
+    };
+  }
+
+  if (request.path === '/api/session') {
+    const authenticated = hasValidSession(request.cookie, deps.operatorPassword, now());
+    if (method === 'GET') {
+      return { status: 200, body: { authenticated } };
+    }
+    if (method !== 'POST') return { status: 405, body: { error: 'Method not allowed.' } };
+    const authGate = deps.authGate ?? deps.gate;
+    if (!authGate.allow(request.ip || 'local', now())) {
+      return { status: 429, body: { error: 'Too many authentication attempts. Try again shortly.' } };
+    }
+    if (!isOperatorPasswordConfigured(deps.operatorPassword)) {
+      return { status: 503, body: { error: 'Operator access is not configured.' } };
+    }
+    if (typeof request.body !== 'object' || request.body === null || Array.isArray(request.body)) {
+      return { status: 400, body: { error: 'Request body is not valid.' } };
+    }
+    const record = request.body as Record<string, unknown>;
+    if (record.logout === true && hasOnlyKeys(record, ['logout'])) {
+      return {
+        status: 200,
+        body: { authenticated: false },
+        headers: { 'set-cookie': clearSessionCookie(request.secure) },
+      };
+    }
+    if (!hasOnlyKeys(record, ['password']) || typeof record.password !== 'string' || record.password.length > 1024) {
+      return { status: 400, body: { error: 'Request body is not valid.' } };
+    }
+    const cookie = createSessionCookie(record.password, deps.operatorPassword, now(), request.secure);
+    if (!cookie) return { status: 401, body: { error: 'Operator password is incorrect.' } };
+    return {
+      status: 200,
+      body: { authenticated: true },
+      headers: { 'set-cookie': cookie },
     };
   }
 
@@ -182,6 +237,16 @@ export async function dispatchBubble(request: BubbleRequest, deps: BubbleDeps): 
   }
   if (method !== 'POST') {
     return { status: 405, body: { error: 'Method not allowed.' } };
+  }
+  if (!isOperatorPasswordConfigured(deps.operatorPassword)) {
+    return { status: 503, body: { error: 'Operator access is not configured.' } };
+  }
+  if (!hasValidSession(request.cookie, deps.operatorPassword, now())) {
+    const authGate = deps.authGate ?? deps.gate;
+    if (!authGate.allow(request.ip || 'local', now())) {
+      return { status: 429, body: { error: 'Too many authentication attempts. Try again shortly.' } };
+    }
+    return { status: 401, body: { error: 'Operator authentication is required.' } };
   }
   if (!deps.gate.allow(request.ip || 'local', now())) {
     return { status: 429, body: { error: 'Rate limit exceeded.' } };
