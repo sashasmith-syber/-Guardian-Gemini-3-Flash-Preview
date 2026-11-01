@@ -161,8 +161,9 @@ describe('bubble http boundary', () => {
     const middleware = createBubbleMiddleware({
       ring: ring('failover', []),
       gate: new RateGate(10, 60_000),
+      authGate: new RateGate(5, 60_000),
       operatorPassword: PASSWORD,
-      maxBodyBytes: 32,
+      maxBodyBytes: 100,
       invoke: async () => ({ text: 'unused' }),
       now,
     });
@@ -187,10 +188,31 @@ describe('bubble http boundary', () => {
       assert.equal(healthBody.ok, true);
       assert.equal(healthBody.ready, false);
       assert.equal(health.headers.get('content-security-policy'), "default-src 'none'; frame-ancestors 'none'; base-uri 'none'");
+      const login = await fetch(`${base}/api/session`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ password: PASSWORD }),
+      });
+      assert.equal(login.status, 200);
+      const cookie = login.headers.get('set-cookie')!.split(';')[0];
+      const session = await fetch(`${base}/api/session`, { headers: { cookie } });
+      assert.deepEqual(await session.json(), { authenticated: true });
+      const authorized = await fetch(`${base}/api/generate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie },
+        body: JSON.stringify({ text: 'status' }),
+      });
+      assert.equal(authorized.status, 503);
+      const denied = await fetch(`${base}/api/generate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'status' }),
+      });
+      assert.equal(denied.status, 401);
       const oversized = await fetch(`${base}/api/generate`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', host: `127.0.0.1:${port}` },
-        body: JSON.stringify({ text: 'x'.repeat(80) }),
+        body: JSON.stringify({ text: 'x'.repeat(200) }),
       });
       const payload = await oversized.json() as { error?: string };
       assert.equal(oversized.status, 413);

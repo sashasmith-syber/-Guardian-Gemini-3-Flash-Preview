@@ -66,6 +66,8 @@ describe('vercel bubble adapter', () => {
     );
     assert.equal(response.status, 200);
     assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
+    assert.equal(response.headers.get('content-security-policy'), "default-src 'none'; frame-ancestors 'none'; base-uri 'none'");
     const payload = await response.json() as { text?: string };
     assert.equal(payload.text, 'clear');
     assert.equal(seen, SECRET);
@@ -148,6 +150,16 @@ describe('vercel bubble adapter', () => {
       deps(invoke),
     );
     assert.equal(foreign.status, 403);
+  });
+
+  it('rejects an oversized session body before reading its content', async () => {
+    const request = new Request('https://guardian.example/api/session', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'content-length': '5000' },
+    });
+    const response = await handleBubbleRequest(request, '/api/session', deps(async () => ({ text: 'unused' })));
+    assert.equal(response.status, 413);
+    assert.equal((await response.json() as { error?: string }).error, 'Request body is too large.');
   });
 
   it('rate limits on the platform client address', async () => {

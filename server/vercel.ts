@@ -128,7 +128,13 @@ export async function handleBubbleRequest(
         : 400;
       return jsonResponse({
         status: status === 413 ? 413 : 400,
-        body: { error: status === 413 ? ATTACHMENT_TOO_LARGE : 'Request body must be JSON.' },
+        body: {
+          error: status !== 413
+            ? 'Request body must be JSON.'
+            : path === '/api/session'
+              ? 'Request body is too large.'
+              : ATTACHMENT_TOO_LARGE,
+        },
       });
     }
     try {
