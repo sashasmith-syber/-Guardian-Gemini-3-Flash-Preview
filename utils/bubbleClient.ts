@@ -1,4 +1,12 @@
+import { ATTACHMENT_TOO_LARGE } from './imageBudget.ts';
+
 const LINK_ERROR = 'API interface destabilized. Check network link.';
+
+export function rejectionMessage(status: number, raw: string, payloadError: unknown): string {
+  if (status === 413 || /PAYLOAD_TOO_LARGE|Request Entity Too Large/i.test(raw)) return ATTACHMENT_TOO_LARGE;
+  if (typeof payloadError === 'string' && payloadError.trim()) return payloadError;
+  return LINK_ERROR;
+}
 
 export async function bubblePost<T>(path: string, body: unknown): Promise<T> {
   let response: Response;
@@ -6,20 +14,24 @@ export async function bubblePost<T>(path: string, body: unknown): Promise<T> {
     response = await fetch(path, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
+      credentials: 'same-origin',
       body: JSON.stringify(body),
     });
   } catch {
     throw new Error(LINK_ERROR);
   }
+  const raw = await response.text();
   let payload: { error?: unknown } = {};
-  try {
-    payload = await response.json();
-  } catch {
-    throw new Error(LINK_ERROR);
+  if (raw) {
+    try {
+      payload = JSON.parse(raw) as { error?: unknown };
+    } catch {
+      payload = {};
+    }
   }
   if (!response.ok) {
-    const message = typeof payload.error === 'string' && payload.error.trim() ? payload.error : LINK_ERROR;
-    throw new Error(message);
+    if (response.status === 401) window.dispatchEvent(new Event('guardian-session-expired'));
+    throw new Error(rejectionMessage(response.status, raw, payload.error));
   }
   return payload as T;
 }

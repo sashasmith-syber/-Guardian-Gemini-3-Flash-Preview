@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, type FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 import { SpeedInsights } from '@vercel/speed-insights/react';
 import { Analytics } from '@vercel/analytics/react';
@@ -17,6 +17,13 @@ import {
 } from './utils/mockData';
 import { sound } from './utils/soundEffects';
 import { bubblePost, imagePayload } from './utils/bubbleClient';
+import { ATTACHMENT_TOO_LARGE } from './utils/imageBudget';
+import {
+  BubbleHealth,
+  classifyBubbleFailure,
+  fetchBubbleHealth,
+  onboardGuardianReply,
+} from './utils/bubbleHealth';
 import { Header } from './components/Header';
 import { DashboardOverview } from './components/DashboardOverview';
 import { TelemetryGrid } from './components/TelemetryGrid';
@@ -26,6 +33,11 @@ import { GuardianTerminal } from './components/GuardianTerminal';
 import { NodeInspectorModal } from './components/NodeInspectorModal';
 
 export const GuardianConsole: React.FC = () => {
+  const [operatorAuthenticated, setOperatorAuthenticated] = useState(false);
+  const [operatorSessionLoading, setOperatorSessionLoading] = useState(true);
+  const [operatorPassword, setOperatorPassword] = useState('');
+  const [operatorSessionError, setOperatorSessionError] = useState('');
+  const [operatorLoginPending, setOperatorLoginPending] = useState(false);
   const [activeView, setActiveView] = useState<'dashboard' | 'telemetry' | 'status' | 'alerts' | 'guardian'>('dashboard');
   const [metrics, setMetrics] = useState<VitalMetrics>(INITIAL_VITAL_METRICS);
   const [nodes, setNodes] = useState<TelemetryNode[]>(INITIAL_NODES);
@@ -38,6 +50,29 @@ export const GuardianConsole: React.FC = () => {
   const [isMuted, setIsMuted] = useState(false);
   const [isLockdownActive, setIsLockdownActive] = useState(false);
   const [pendingDirective, setPendingDirective] = useState<string | null>(null);
+  const [bubbleHealth, setBubbleHealth] = useState<BubbleHealth | null>(null);
+  const [bubbleHealthKnown, setBubbleHealthKnown] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch('/api/session', { cache: 'no-store', credentials: 'same-origin' })
+      .then((response) => response.json() as Promise<{ authenticated?: boolean }>)
+      .then((session) => {
+        if (!cancelled) setOperatorAuthenticated(session.authenticated === true);
+      })
+      .catch(() => {
+        if (!cancelled) setOperatorAuthenticated(false);
+      })
+      .finally(() => {
+        if (!cancelled) setOperatorSessionLoading(false);
+      });
+    const expireSession = () => setOperatorAuthenticated(false);
+    window.addEventListener('guardian-session-expired', expireSession);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('guardian-session-expired', expireSession);
+    };
+  }, []);
 
   // Stream history for charts (last 20 points)
   const [streamHistory, setStreamHistory] = useState<{ ingress: number; egress: number; time: string }[]>(() => {
@@ -47,6 +82,25 @@ export const GuardianConsole: React.FC = () => {
       time: `${i}s`,
     }));
   });
+
+  // Real bubble health — onboard line, not a decorative status light
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = async () => {
+      const health = await fetchBubbleHealth();
+      if (cancelled) return;
+      setBubbleHealth(health);
+      setBubbleHealthKnown(true);
+    };
+    void refresh();
+    const interval = setInterval(() => {
+      void refresh();
+    }, 15_000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
 
   // Real-time telemetry heartbeat effect
   useEffect(() => {
@@ -217,7 +271,45 @@ export const GuardianConsole: React.FC = () => {
     setSelectedNode(updatedNode);
   };
 
-  // Send message to Guardian Strategist AI
+  const handleOperatorLogin = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setOperatorLoginPending(true);
+    setOperatorSessionError('');
+    try {
+      const response = await fetch('/api/session', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ password: operatorPassword }),
+      });
+      const result = await response.json() as { authenticated?: boolean; error?: string };
+      if (!response.ok || result.authenticated !== true) {
+        setOperatorSessionError(result.error || 'Unable to authenticate operator.');
+        return;
+      }
+      setOperatorAuthenticated(true);
+      setOperatorPassword('');
+    } catch {
+      setOperatorSessionError('Operator sign-in is unavailable. Check the network and try again.');
+    } finally {
+      setOperatorLoginPending(false);
+    }
+  };
+
+  const handleOperatorLogout = async () => {
+    try {
+      await fetch('/api/session', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ logout: true }),
+      });
+    } finally {
+      setOperatorAuthenticated(false);
+    }
+  };
+
+  // Send message to Guardian Strategist AI — live bubble only (no Potemkin enclave briefs)
   const handleSendMessage = async (text: string, imageData?: string) => {
     const userMessage: ChatMessage = {
       id: `msg-${Date.now()}-user`,
@@ -230,146 +322,56 @@ export const GuardianConsole: React.FC = () => {
     setMessages((prev) => [...prev, userMessage]);
     setIsProcessing(true);
 
+    const pushGuardian = (content: string) => {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `msg-${Date.now()}-guardian`,
+          role: 'GUARDIAN',
+          content,
+          timestamp: new Date().toLocaleTimeString(),
+        },
+      ]);
+      sound.playTacticalPing();
+    };
+
     try {
-      let usedBubble = false;
-      try {
-        const response = await bubblePost<{ text?: string }>('/api/generate', {
-          text: text || 'Analyze attached visual specimen for threat artifacts.',
-          image: imagePayload(imageData),
-        });
-        const replyContent = response.text || 'Confirmed. Action underway.\n\n*Light is Knowledge. Knowledge is Power.*';
-        const guardianReply: ChatMessage = {
-          id: `msg-${Date.now()}-guardian`,
-          role: 'GUARDIAN',
-          content: replyContent,
-          timestamp: new Date().toLocaleTimeString(),
-        };
-        setMessages((prev) => [...prev, guardianReply]);
-        sound.playTacticalPing();
-        usedBubble = true;
-      } catch (error: any) {
-        const message = String(error?.message || '');
-        if (!/not configured/i.test(message)) throw error;
-      }
-
-      if (!usedBubble) {
-        // Authoritative sovereign persona engine when external API key is in local enclave mode
-        await new Promise((r) => setTimeout(r, 650));
-
-        let generatedBrief = '';
-        const lower = text.toLowerCase();
-
-        if (lower.includes('investigate') || lower.includes('disrupted') || lower.includes('jitter')) {
-          generatedBrief = `### TACTICAL INVESTIGATION BRIEF: INTERFACE JITTER & ENCLAVE INTEGRITY
-OPERATOR: Comprehensive forensic investigation of telemetry interfaces and neural links completed.
-
-#### 1. DECONSTRUCTION OF ROOT CAUSE
-- **Incident Vector**: Ephemeral transport layer socket timeout between external relay and Sovereign Guardian Core.
-- **Root Cause**: Transport handshake latency jitter exceeded 120ms threshold during cryptographic token exchange.
-- **Failover Mechanism**: Sovereign Local Enclave Cache engaged autonomously within $4.2\\text{ms}$. Zero state loss occurred.
-
-#### 2. SYSTEM STATUS & TELEMETRY VERIFICATION
-| Subsystem Domain | Verified Status | Coherence Index | Notes |
-| :--- | :--- | :--- | :--- |
-| **Terrestrial Enclaves (10 Nodes)** | NOMINAL | 99.8% | Zero memory drift or packet corruption. |
-| **Orbital Constellation (Nodes 11 & 12)** | SYNCHRONIZED | 99.4% | LEO handover verified over polar aperture. |
-| **Post-Quantum Cryptography** | SEALED | 100.0% | Crystals-Kyber-768 key lattice intact. |
-| **Sentinel Neural Gateway** | RE-ANCHORED | 99.9% | Synchronized to Gemini 3.8 Flash pipeline. |
-
-#### 3. IMMEDIATE MITIGATION ACTIONS ENGAGED
-1. **Socket Re-anchoring**: Upstream endpoint re-routed through Ashburn Primus (Node 01) redundant fiber trunk.
-2. **Buffer Flush**: Ephemeral transport retry ring-buffers compacted and verified against SHA-256 state hash.
-3. **Quorum Audit**: Consensus epoch validated across all 48 Byzantine peers. No split-brain or rogue advertisements.
-
-**TACTICAL DIRECTIVE FOR OPERATOR:**
-Perimeter defense is fully reinforced. All sanctuary invariants remain strictly enforced. 
-
-Orchestration initiated. Protocol engaged.
-
----
-*Light is Knowledge. Knowledge is Power. The sanctuary stands fortified.*`;
-        } else if (lower.includes('alert') || lower.includes('threat') || lower.includes('udp')) {
-          generatedBrief = `### DECONSTRUCTION & TACTICAL ILLUMINATION
-OPERATOR: The anomaly vector has been deconstructed by the Sentinel Neural Gateway.
-
-| Vector Param | Assessed Value | Sovereign Status |
-| :--- | :--- | :--- |
-| **Ingress Point** | AP-South Gateway Strait (Node 06) | Quarantined Buffer |
-| **Entropy Signature** | 7.94 bits/byte (High Randomness) | Synthetic Probe Isolated |
-| **Countermeasure** | Post-Quantum Kyber-768 Rekey | Active Execution |
-
-**SYNTHESIS:**
-The telemetry surge is characteristic of an automated reconnaissance probe testing cipher negotiation thresholds. No cryptographic bleed or unauthorized ingress was achieved.
-
-**EXECUTION HAND-OFF:**
-Orchestration initiated. Kyber-768 key rotation dispatched.
-
----
-*Light is Knowledge. Knowledge is Power. The sanctuary remains unbreached.*`;
-        } else if (lower.includes('perimeter') || lower.includes('telemetry') || lower.includes('status')) {
-          generatedBrief = `### SANCTUARY TELEMETRY AUDIT
-OPERATOR: Comprehensive status deconstruction complete across 12 distributed autonomous nodes.
-
-1. **Ingress Line Rate**: Nominal at ${metrics.ingressBandwidthGbps.toFixed(2)} GB/s.
-2. **Consensus Mesh**: 48/48 multi-raft peers synchronized. Latency delta $\\le 1.8\\text{ms}$.
-3. **Cryptographic Posture**: Post-Quantum Kyber-768 active. Zero unverified transits.
-
-**RECOMMENDED POSTURE:**
-Maintain DEFCON 4 baseline. Ready reserve buffers on Frankfurt and Singapore relays.
-
-Protocol engaged.
-
----
-*Light is Knowledge. Knowledge is Power.*`;
-        } else {
-          generatedBrief = `OPERATOR: Directive received and synthesized within the logical core.
-
-### STRATEGIC APPRAISAL
-- **Directive Alpha**: Illumination delivered. Core status nominal across all 5 operational subsystems.
-- **Directive Beta**: Sanctuary boundary validated. Zero unauthorized penetration vectors detected.
-- **Directive Gamma**: Flawless logical coherence maintained.
-
-Confirmed. Action underway.
-
----
-*Light is Knowledge. Knowledge is Power.*`;
-        }
-
-        const guardianReply: ChatMessage = {
-          id: `msg-${Date.now()}-guardian`,
-          role: 'GUARDIAN',
-          content: generatedBrief,
-          timestamp: new Date().toLocaleTimeString(),
-        };
-
-        setMessages((prev) => [...prev, guardianReply]);
-        sound.playTacticalPing();
-      }
+      const response = await bubblePost<{ text?: string }>('/api/generate', {
+        text: text || 'Analyze attached visual specimen for threat artifacts.',
+        image: imagePayload(imageData),
+      });
+      const health = await fetchBubbleHealth();
+      setBubbleHealth(health);
+      setBubbleHealthKnown(true);
+      pushGuardian(response.text || 'Confirmed. Action underway.\n\n*Light is Knowledge. Knowledge is Power.*');
     } catch (error: any) {
       console.error('Guardian generation error:', error);
-      
-      const forensicDiagnostic = `### FORENSIC DIAGNOSTIC & TACTICAL ILLUMINATION
-OPERATOR: Upstream API link reported transport variance (${error?.message || 'Socket timeout'}). Local sovereign enclave immediately took custody of command processing.
+      const message = String(error?.message || '');
+      if (message === ATTACHMENT_TOO_LARGE) {
+        pushGuardian(message);
+        return;
+      }
 
-#### INVESTIGATION FINDINGS:
-1. **Network Link**: Upstream gateway latency jitter detected.
-2. **Local Sanctuary Telemetry**: 100% operational. Ingress stream: ${metrics.ingressBandwidthGbps.toFixed(2)} GB/s.
-3. **Data Integrity**: Cryptographic hashes for all 12 nodes verified against local enclave state. Zero unauthorized data egress.
-4. **Autonomous Action**: Transport pipeline re-anchored to \`gemini-3.8-flash\` protocol.
+      const kind = classifyBubbleFailure(message);
+      if (kind === 'unconfigured' || kind === 'cooling') {
+        const health = await fetchBubbleHealth();
+        setBubbleHealth(health);
+        setBubbleHealthKnown(true);
+        pushGuardian(onboardGuardianReply(kind));
+        return;
+      }
 
-Confirmed. Action underway.
+      pushGuardian(`### UPSTREAM FAILURE — NO SYNTHETIC BRIEF
+
+OPERATOR: The safe bubble rejected this turn (\`${message || 'Socket timeout'}\`). No local enclave brief was fabricated.
+
+#### Honest status
+1. **Bubble call**: Failed — see error above.
+2. **Telemetry UI**: Still rendering local mock streams (${metrics.ingressBandwidthGbps.toFixed(2)} GB/s display only).
+3. **Next step**: Retry once. If it persists, check \`/api/health\`, key cooldown, and Vercel/function logs.
 
 ---
-*Light is Knowledge. Knowledge is Power. Sanctuary invariants preserved.*`;
-
-      const fallbackReply: ChatMessage = {
-        id: `msg-${Date.now()}-diagnostic`,
-        role: 'GUARDIAN',
-        content: forensicDiagnostic,
-        timestamp: new Date().toLocaleTimeString(),
-      };
-      setMessages((prev) => [...prev, fallbackReply]);
-      sound.playTacticalPing();
+*Light is Knowledge. Knowledge is Power. Honesty before illumination.*`);
     } finally {
       setIsProcessing(false);
     }
@@ -420,6 +422,39 @@ Confirmed. Action underway.
     link.click();
     document.body.removeChild(link);
   };
+
+  if (operatorSessionLoading) {
+    return <main className="min-h-screen bg-[#07090e] text-[#00f2ff] font-mono grid place-items-center">CHECKING OPERATOR SESSION…</main>;
+  }
+
+  if (!operatorAuthenticated) {
+    return (
+      <main className="min-h-screen bg-[#07090e] text-[#00f2ff] font-mono grid place-items-center p-4">
+        <form onSubmit={handleOperatorLogin} className="w-full max-w-md border border-[#00f2ff]/30 bg-black/60 p-6 space-y-4">
+          <h1 className="text-lg tracking-widest">GUARDIAN OPERATOR SIGN-IN</h1>
+          <p className="text-xs text-[#00f2ff]/70">Enter the operator password configured on the server. It is not stored in this browser.</p>
+          <label className="block text-xs" htmlFor="operator-password">Operator password</label>
+          <input
+            id="operator-password"
+            autoComplete="current-password"
+            type="password"
+            required
+            value={operatorPassword}
+            onChange={(event) => setOperatorPassword(event.target.value)}
+            className="w-full border border-[#00f2ff]/40 bg-black px-3 py-2 text-sm text-white"
+          />
+          {operatorSessionError && <p role="alert" className="text-sm text-red-400">{operatorSessionError}</p>}
+          <button
+            type="submit"
+            disabled={operatorLoginPending}
+            className="w-full border border-[#00f2ff] px-3 py-2 text-xs tracking-widest disabled:opacity-50"
+          >
+            {operatorLoginPending ? 'VERIFYING…' : 'AUTHENTICATE'}
+          </button>
+        </form>
+      </main>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#07090e] text-[#00f2ff] font-mono flex flex-col selection:bg-[#00f2ff] selection:text-black">
@@ -525,6 +560,13 @@ Confirmed. Action underway.
             onExportCsv={handleExportCsv}
             pendingDirective={pendingDirective}
             onClearPendingDirective={() => setPendingDirective(null)}
+            bubbleHealth={bubbleHealth}
+            bubbleHealthKnown={bubbleHealthKnown}
+            onRefreshBubbleHealth={async () => {
+              const health = await fetchBubbleHealth();
+              setBubbleHealth(health);
+              setBubbleHealthKnown(true);
+            }}
           />
         )}
       </main>
@@ -551,14 +593,33 @@ Confirmed. Action underway.
         <div className="flex items-center gap-3">
           <span>GUARDIAN CORE V3.0</span>
           <span>·</span>
-          <span>POST-QUANTUM KYBER-768</span>
+          <span>SAFE BUBBLE</span>
           <span>·</span>
-          <span>UPTIME: 148d 18h 42m</span>
+          <span>
+            {!bubbleHealthKnown
+              ? 'HEALTH: CHECKING'
+              : bubbleHealth?.ready
+                ? 'READY'
+                : bubbleHealth
+                  ? 'OFFLINE'
+                  : 'HEALTH: UNREACHABLE'}
+          </span>
+          <button type="button" onClick={handleOperatorLogout} className="hover:text-white">SIGN OUT</button>
         </div>
         <div className="flex items-center gap-3 font-mono">
-          <span>ACTIVE SENSORS: OPTICAL · ACOUSTIC · VOCAL</span>
+          <span>SENSORS: OPTICAL · ACOUSTIC · VOCAL</span>
           <span>·</span>
-          <span className="text-emerald-400">STATUS: REINFORCED</span>
+          <span
+            className={
+              bubbleHealth?.ready ? 'text-emerald-400' : bubbleHealthKnown ? 'text-amber-400' : 'text-[#00f2ff]/50'
+            }
+          >
+            {!bubbleHealthKnown
+              ? 'STATUS: PROBING'
+              : bubbleHealth?.ready
+                ? 'STATUS: BUBBLE LIVE'
+                : 'STATUS: ONBOARD REQUIRED'}
+          </span>
         </div>
       </footer>
 
