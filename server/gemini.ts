@@ -3,11 +3,12 @@ import type { BubbleOp, BubbleResult } from './bubble.ts';
 import { SYSTEM_INSTRUCTION } from './persona.ts';
 
 const TEXT_MODEL = 'gemini-3-flash-preview';
-const IMAGE_MODEL = 'gemini-3-pro-preview';
 const TTS_MODEL = 'gemini-2.5-flash-preview-tts';
+const PROVIDER_TIMEOUT_MS = 40_000;
+const MAX_OUTPUT_TOKENS = 1024;
 
 export async function invokeGemini(apiKey: string, op: BubbleOp): Promise<BubbleResult> {
-  const ai = new GoogleGenAI({ apiKey });
+  const ai = new GoogleGenAI({ apiKey, httpOptions: { timeout: PROVIDER_TIMEOUT_MS } });
 
   if (op.kind === 'tts') {
     const response = await ai.models.generateContent({
@@ -15,6 +16,7 @@ export async function invokeGemini(apiKey: string, op: BubbleOp): Promise<Bubble
       contents: [{ parts: [{ text: `Say with strategic authority: ${op.text.slice(0, 500)}` }] }],
       config: {
         responseModalities: [Modality.AUDIO],
+        maxOutputTokens: 512,
         speechConfig: {
           voiceConfig: {
             prebuiltVoiceConfig: { voiceName: 'Kore' },
@@ -40,6 +42,7 @@ export async function invokeGemini(apiKey: string, op: BubbleOp): Promise<Bubble
           ],
         },
       ],
+      config: { maxOutputTokens: MAX_OUTPUT_TOKENS },
     });
     return { text: response.text ?? '' };
   }
@@ -51,11 +54,12 @@ export async function invokeGemini(apiKey: string, op: BubbleOp): Promise<Bubble
     parts.push({ inlineData: { data: op.image.data, mimeType: op.image.mimeType } });
   }
   const response = await ai.models.generateContent({
-    model: op.image ? IMAGE_MODEL : TEXT_MODEL,
+    model: TEXT_MODEL,
     contents: [{ role: 'user', parts }],
     config: {
       systemInstruction: SYSTEM_INSTRUCTION,
       temperature: 0.2,
+      maxOutputTokens: MAX_OUTPUT_TOKENS,
     },
   });
   return { text: response.text ?? '' };

@@ -7,22 +7,28 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --experimental-strip-types --test server/*.test.ts utils/*.test.ts"
+    "cf:preview": "npm run build && wrangler preview",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test server/*.test.ts"
   },
   "dependencies": {
     "@google/genai": "^1.37.0",
+    "@vercel/speed-insights": "^2.0.0",
+    "lucide-react": "^1.59.0",
     "react": "^19.2.3",
-    "react-dom": "^19.2.3",
+    "react-dom": "^19.3.1",
     "react-markdown": "^10.1.0",
-    "lucide-react": "^1.57.0",
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^22.14.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^5.0.0",
     "tailwindcss": "^4.3.3",
-    "typescript": "~5.8.2",
-    "vite": "^6.2.0"
+    "typescript": "~7.0.2",
+    "vite": "^6.4.5",
+    "wrangler": "^4.156.0"
   }
 }
