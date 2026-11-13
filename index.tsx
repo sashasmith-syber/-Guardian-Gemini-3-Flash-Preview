@@ -1,6 +1,7 @@
 import React, { useState, useEffect, type FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 import { SpeedInsights } from '@vercel/speed-insights/react';
+import { Analytics } from '@vercel/analytics/react';
 import { 
   StrategicAlert, 
   TelemetryNode, 
@@ -588,6 +589,9 @@ OPERATOR: The safe bubble rejected this turn (\`${message || 'Socket timeout'}\`
 
       {/* Vercel Speed Insights */}
       <SpeedInsights />
+      
+      {/* Vercel Web Analytics */}
+      <Analytics />
 
       {/* Discreet Footer Bar */}
       <footer className="border-t border-[#00f2ff]/10 bg-[#05070a] px-4 py-2 text-[10px] text-[#00f2ff]/50 flex flex-wrap items-center justify-between gap-3">
