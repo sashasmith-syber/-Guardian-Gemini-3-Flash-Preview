@@ -115,6 +115,19 @@ export const GuardianTerminal: React.FC<GuardianTerminalProps> = ({
       setSelectedImage(null);
       setImageNote(err instanceof Error ? err.message : 'Image could not be prepared.');
     }
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const result = typeof reader.result === 'string' ? reader.result : '';
+      if (!imagePayload(result)) {
+        setSelectedImage(null);
+        setFormNotice('Image payload was rejected.');
+        return;
+      }
+      setFormNotice(null);
+      setSelectedImage(result);
+      sound.playTacticalPing();
+    };
+    reader.readAsDataURL(file);
   };
 
   const toggleRecording = async () => {
@@ -123,6 +136,7 @@ export const GuardianTerminal: React.FC<GuardianTerminalProps> = ({
       setIsRecording(false);
       sound.playTacticalPing();
     } else {
+      let stream: MediaStream | undefined;
       try {
         setSensorNote(null);
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -141,14 +155,16 @@ export const GuardianTerminal: React.FC<GuardianTerminalProps> = ({
             await transcribeAudio(base64Audio);
           };
           reader.readAsDataURL(audioBlob);
-          stream.getTracks().forEach((track) => track.stop());
+          liveStream.getTracks().forEach((track) => track.stop());
         };
 
         mediaRecorder.start();
         mediaRecorderRef.current = mediaRecorder;
         setIsRecording(true);
+        setFormNotice(null);
         sound.playTacticalPing();
       } catch (err) {
+        stream?.getTracks().forEach((track) => track.stop());
         console.error('Microphone access denied:', err);
         setSensorNote('Microphone blocked or unavailable. Allow mic permission, then retry — no fake voice directive was inserted.');
       }
@@ -223,9 +239,12 @@ export const GuardianTerminal: React.FC<GuardianTerminalProps> = ({
 
   const copyMessage = (id: string, text: string) => {
     sound.playKeypressBlip();
-    navigator.clipboard.writeText(text);
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 2000);
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(null), 2000);
+    }).catch(() => {
+      setFormNotice('Clipboard write was blocked.');
+    });
   };
 
   const quickPrompts = [
@@ -254,6 +273,7 @@ export const GuardianTerminal: React.FC<GuardianTerminalProps> = ({
               sound.playTacticalPing();
               onExportCsv();
             }}
+            aria-label="Export log"
             className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs border border-[#00f2ff]/30 text-[#00f2ff] hover:bg-[#00f2ff]/10 transition-colors"
           >
             <Download className="w-3.5 h-3.5" />
@@ -356,6 +376,7 @@ export const GuardianTerminal: React.FC<GuardianTerminalProps> = ({
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => copyMessage(msg.id, msg.content)}
+                      aria-label={copiedId === msg.id ? 'Copied' : 'Copy message'}
                       title="Copy text"
                       className="p-1 text-[#888] hover:text-[#00f2ff] transition-colors"
                     >
@@ -370,6 +391,7 @@ export const GuardianTerminal: React.FC<GuardianTerminalProps> = ({
                       <button
                         onClick={() => synthesizeTTS(msg.content)}
                         disabled={isSynthesizingTTS}
+                        aria-label="Vocalize response"
                         title="Vocalize response"
                         className="flex items-center gap-1 text-[10px] text-[#00f2ff]/70 hover:text-[#00f2ff] border border-[#00f2ff]/30 px-2 py-0.5 rounded transition-colors"
                       >
@@ -381,11 +403,11 @@ export const GuardianTerminal: React.FC<GuardianTerminalProps> = ({
                 </div>
 
                 {/* Attached Image if any */}
-                {msg.imageData && (
+                {msg.imageData && imagePayload(msg.imageData) && (
                   <div className="mb-3 relative w-fit">
                     <img
                       src={msg.imageData}
-                      alt="Operator Attachment"
+                      alt="Operator attachment"
                       className="max-w-xs max-h-48 rounded border border-[#00f2ff]/40 object-cover"
                     />
                     <div className="text-[9px] text-[#00f2ff]/60 font-mono mt-1">
@@ -420,6 +442,9 @@ export const GuardianTerminal: React.FC<GuardianTerminalProps> = ({
                         <code className="bg-[#1a2130] px-1 py-0.5 rounded text-cyan-300 font-mono text-xs" {...props} />
                       ),
                       p: ({ node, ...props }) => <p className="mb-2 last:mb-0" {...props} />,
+                      a: ({ node, ...props }) => (
+                        <a {...props} rel="noreferrer noopener" target="_blank" />
+                      ),
                     }}
                   >
                     {msg.content}
@@ -431,7 +456,11 @@ export const GuardianTerminal: React.FC<GuardianTerminalProps> = ({
         )}
 
         {isProcessing && (
-          <div className="p-3 bg-[#080b10] border border-[#00f2ff]/40 rounded mr-12 flex items-center gap-2 text-xs text-[#00f2ff] animate-pulse">
+          <div
+            role="status"
+            aria-live="polite"
+            className="p-3 bg-[#080b10] border border-[#00f2ff]/40 rounded mr-12 flex items-center gap-2 text-xs text-[#00f2ff] animate-pulse"
+          >
             <Sparkles className="w-4 h-4 animate-spin" />
             <span className="font-mono tracking-wider">
               SYNTHESIZING PARALLEL DATA STREAMS · ENGAGING GUARDIAN CORE...
@@ -473,7 +502,7 @@ export const GuardianTerminal: React.FC<GuardianTerminalProps> = ({
           <input
             id="terminal-file-upload"
             type="file"
-            accept="image/*"
+            accept={OPERATOR_IMAGE_TYPES.join(',')}
             className="hidden"
             onChange={handleImageUpload}
           />
@@ -481,7 +510,8 @@ export const GuardianTerminal: React.FC<GuardianTerminalProps> = ({
           <button
             type="button"
             onClick={() => document.getElementById('terminal-file-upload')?.click()}
-            title="Attach visual specimen for Gemini 3 Pro inspection"
+            aria-label="Attach image"
+            title="Attach a PNG, JPEG, WEBP, or GIF under 4 MB"
             className={`p-2 rounded border transition-colors ${
               selectedImage
                 ? 'bg-[#00f2ff]/20 border-[#00f2ff] text-[#00f2ff]'
@@ -494,6 +524,7 @@ export const GuardianTerminal: React.FC<GuardianTerminalProps> = ({
           <button
             type="button"
             onClick={toggleRecording}
+            aria-label={isRecording ? 'Stop recording' : 'Record voice command'}
             title={isRecording ? 'Stop recording voice directive' : 'Record voice command for transcription'}
             className={`p-2 rounded border transition-colors ${
               isRecording
@@ -505,19 +536,27 @@ export const GuardianTerminal: React.FC<GuardianTerminalProps> = ({
           </button>
 
           <div className="relative flex-1 flex items-center">
-            <span className="absolute left-3 text-[#00f2ff] font-mono text-xs font-bold pointer-events-none select-none">
-              OPERATOR &gt;
-            </span>
+            <label
+              htmlFor="guardian-directive"
+              className="absolute left-3 text-[#00f2ff] font-mono text-xs font-bold pointer-events-none select-none"
+            >
+              <span className="sr-only">Operator directive</span>
+              <span aria-hidden="true">OPERATOR &gt;</span>
+            </label>
             <input
+              id="guardian-directive"
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               disabled={isProcessing}
-              placeholder={isProcessing ? 'SYNCHRONIZING CORE...' : 'Enter strategic directive or telemetry inquiry...'}
-              className="w-full bg-[#111622] border border-[#00f2ff]/30 rounded text-xs pl-28 pr-10 py-2.5 text-white placeholder-[#00f2ff]/30 focus:outline-none focus:border-[#00f2ff] transition-colors disabled:opacity-50 font-mono"
+              maxLength={16000}
+              autoComplete="off"
+              placeholder="Enter strategic directive or telemetry inquiry..."
+              className="guardian-field w-full bg-[#111622] border border-[#00f2ff]/30 rounded text-xs pl-28 pr-10 py-2.5 text-white focus:border-[#00f2ff] transition-colors disabled:opacity-50 font-mono"
             />
             <button
               type="submit"
+              aria-label="Send directive"
               disabled={(!input.trim() && !selectedImage) || isProcessing}
               className="absolute right-2 p-1.5 text-[#00f2ff] hover:text-white disabled:opacity-30 disabled:hover:text-[#00f2ff] transition-colors"
             >
