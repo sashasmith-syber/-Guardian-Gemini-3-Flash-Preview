@@ -132,13 +132,18 @@ export const StrategicAlertFeed: React.FC<StrategicAlertFeedProps> = ({
         <div className="flex flex-wrap items-center gap-2">
           {/* Search */}
           <div className="relative">
-            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-[#00f2ff]/50" />
+            <Search aria-hidden="true" className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-[#00f2ff]/50" />
+            <label className="sr-only" htmlFor="alert-search">
+              Search threat alerts
+            </label>
             <input
-              type="text"
+              id="alert-search"
+              type="search"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
+              autoComplete="off"
               placeholder="Search threat alerts..."
-              className="bg-[#111622] border border-[#00f2ff]/30 rounded text-xs pl-8 pr-3 py-1 text-white placeholder-[#00f2ff]/30 focus:outline-none focus:border-[#00f2ff] w-48 sm:w-64"
+              className="guardian-field bg-[#111622] border border-[#00f2ff]/30 rounded text-xs pl-8 pr-3 py-1 text-white focus:border-[#00f2ff] w-48 sm:w-64"
             />
           </div>
 
@@ -151,6 +156,7 @@ export const StrategicAlertFeed: React.FC<StrategicAlertFeedProps> = ({
                   sound.playKeypressBlip();
                   setSeverityFilter(sev);
                 }}
+                aria-pressed={severityFilter === sev}
                 className={`px-2 py-1 text-[10px] font-medium rounded transition-colors whitespace-nowrap ${
                   severityFilter === sev
                     ? 'bg-[#00f2ff] text-black font-semibold'
@@ -171,6 +177,7 @@ export const StrategicAlertFeed: React.FC<StrategicAlertFeedProps> = ({
                   sound.playKeypressBlip();
                   setStatusFilter(st);
                 }}
+                aria-pressed={statusFilter === st}
                 className={`px-2 py-1 text-[10px] font-medium rounded transition-colors whitespace-nowrap ${
                   statusFilter === st
                     ? 'bg-[#00f2ff] text-black font-semibold'

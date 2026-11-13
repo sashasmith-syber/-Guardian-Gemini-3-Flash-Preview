@@ -1,6 +1,7 @@
 import React, { useState, useEffect, type FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 import { SpeedInsights } from '@vercel/speed-insights/react';
+import { Analytics } from '@vercel/analytics/react';
 import { 
   StrategicAlert, 
   TelemetryNode, 
@@ -393,7 +394,9 @@ OPERATOR: The safe bubble rejected this turn (\`${message || 'Socket timeout'}\`
     rows.push('--- TELEMETRY NODES ---');
     rows.push('ID,Name,Region,Tier,Status,CPU(%),RAM(%),Thermal(C),Latency(ms)');
     nodes.forEach((n) => {
-      rows.push(`"${n.id}","${n.name}","${n.region}","${n.tier}","${n.status}",${n.cpuLoad},${n.memoryUsage},${n.thermalC},${n.latencyMs}`);
+      rows.push(
+        [csvCell(n.id), csvCell(n.name), csvCell(n.region), csvCell(n.tier), csvCell(n.status), n.cpuLoad, n.memoryUsage, n.thermalC, n.latencyMs].join(','),
+      );
     });
     rows.push('');
 
@@ -401,7 +404,9 @@ OPERATOR: The safe bubble rejected this turn (\`${message || 'Socket timeout'}\`
     rows.push('--- STRATEGIC ALERTS ---');
     rows.push('ID,Timestamp,Severity,Status,ImpactScore,Title,Origin,Target');
     alerts.forEach((a) => {
-      rows.push(`"${a.id}","${a.timestamp}","${a.severity}","${a.status}",${a.impactScore},"${a.title.replace(/"/g, '""')}","${a.origin}","${a.targetSubsystem}"`);
+      rows.push(
+        [csvCell(a.id), csvCell(a.timestamp), csvCell(a.severity), csvCell(a.status), a.impactScore, csvCell(a.title), csvCell(a.origin), csvCell(a.targetSubsystem)].join(','),
+      );
     });
     rows.push('');
 
@@ -409,7 +414,7 @@ OPERATOR: The safe bubble rejected this turn (\`${message || 'Socket timeout'}\`
     rows.push('--- CONSOLE DIRECTIVES ---');
     rows.push('Role,Timestamp,Content');
     messages.forEach((m) => {
-      rows.push(`"${m.role}","${m.timestamp}","${m.content.replace(/"/g, '""')}"`);
+      rows.push([csvCell(m.role), csvCell(m.timestamp), csvCell(m.content)].join(','));
     });
 
     const csvBlob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
@@ -420,6 +425,7 @@ OPERATOR: The safe bubble rejected this turn (\`${message || 'Socket timeout'}\`
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 0);
   };
 
   if (operatorSessionLoading) {
@@ -583,6 +589,9 @@ OPERATOR: The safe bubble rejected this turn (\`${message || 'Socket timeout'}\`
 
       {/* Vercel Speed Insights */}
       <SpeedInsights />
+      
+      {/* Vercel Web Analytics */}
+      <Analytics />
 
       {/* Discreet Footer Bar */}
       <footer className="border-t border-[#00f2ff]/10 bg-[#05070a] px-4 py-2 text-[10px] text-[#00f2ff]/50 flex flex-wrap items-center justify-between gap-3">
